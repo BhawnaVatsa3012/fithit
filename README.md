@@ -1,20 +1,36 @@
 # FitHit
 
-Personal gym and protein tracker. Vite app, deployed on Vercel, data in Supabase.
+Personal gym, protein and body tracker. Vite app on Vercel, data in Supabase (project parv-app).
 
-## What's inside
-- `index.html` – page shell
-- `src/main.js` – all app logic: weekly plan, knee/back cues, logging, meals and protein, progress, calendar, sign-in, saving
-- `src/style.css` – the "Scoreboard" design from Claude Design
-- `src/config.js` – public Supabase connection details (project: parv-app)
+## Structure
+| File | What it holds |
+|---|---|
+| `src/catalogue.js` | Machines, knee/back cues, weekly plan, foods (protein + kcal), default targets |
+| `src/model.js` | Pure calculations: validation, totals, progression, pace, waist-to-hip ratio |
+| `src/store.js` | All Supabase calls, conflict-checked saves, on-device cache and unsaved drafts |
+| `src/state.js` | Shared app state |
+| `src/views.js` | The four screens (Log, Meals, Progress, Calendar) and sign-in |
+| `src/main.js` | Wiring: rendering, taps and typing, saving, start-up |
+| `supabase/migrations/` | Database setup, versioned with the code |
+| `tests/` | `npm test` runs the calculation tests |
 
-## Data
-One row per logged day in the `fithit_days` table (Supabase project parv-app).
-Row-level security means only your signed-in account can read or write your rows.
+Personal numbers (targets, weights) are never stored in this repo. They live in your account's `fithit_settings` row.
 
-## Run locally (optional)
+## Data and privacy
+- `fithit_days`: one row per day (workout, loads, knee, meals, body check-in). Row-level security: only the owner can read or write.
+- `fithit_members`: the single account allowed to use FitHit. Anyone else who signs in sees "Not set up for this account".
+- `fithit_settings`: your targets.
+- In the app: Progress → Targets & settings → Export (JSON download) or Delete (everything).
+
+## Deploying a change
+1. Commit to `main`. Vercel builds and deploys automatically.
+2. If the change includes a new file in `supabase/migrations/`, apply it to parv-app (Supabase dashboard → SQL editor, or ask Claude).
+
+## First-time setup / new owner
+Apply the migrations, then run `supabase/seed_owner.sql` with your email **before** sharing the link.
+
+## Local development
 npm install
 npm run dev
-
-## Deploy
-Every push to the `main` branch redeploys on Vercel automatically.
+npm test
+npx -y eslint@9 src tests   # optional code check (uses eslint.config.js)
