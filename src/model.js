@@ -1,5 +1,5 @@
 // Pure data logic: no DOM, no network. Covered by tests/model.test.js.
-import { MEALS, FOOD_BY, BY_ID, PROGRESSION } from './catalogue.js';
+import { MEALS, FOOD_BY, BY_ID, PROGRESSION, RANK, MINUTES } from './catalogue.js';
 
 export const pad = n => String(n).padStart(2, '0');
 export const keyOf = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -10,12 +10,12 @@ export const daysBetween = (a, b) => Math.round((parseKey(b) - parseKey(a)) / 86
 export const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 export const clone = o => JSON.parse(JSON.stringify(o));
 
-export function blank() { return { gym: false, cardio: {}, machines: [], loads: {}, meals: {}, extra: {}, extraK: {}, body: {} }; }
+export function blank() { return { gym: false, cardio: {}, machines: [], loads: {}, meals: {}, extra: {}, extraK: {}, body: {}, cx: [], cf: {} }; }
 export function ensure(e) {
   e = e || blank();
-  for (const k of ['cardio', 'loads', 'meals', 'extra', 'extraK', 'body']) e[k] = e[k] || {};
-  e.machines = e.machines || [];
-  MEALS.forEach(m => { if (!e.meals[m.id]) e.meals[m.id] = {}; });
+  for (const k of ['cardio', 'loads', 'meals', 'extra', 'extraK', 'body', 'cf']) e[k] = e[k] || {};
+  e.machines = e.machines || []; e.cx = e.cx || [];
+  MEALS.forEach(m => { if (!e.meals[m.id]) e.meals[m.id] = {}; if (!e.cf[m.id]) e.cf[m.id] = []; });
   return e;
 }
 
@@ -25,15 +25,60 @@ const num = (v, lo, hi, step) => {
   return step ? Math.round(n / step) * step : n;
 };
 
-export function isGymDay(e) { return !!(e && (e.gym || (e.machines && e.machines.length) || (e.cardio && Object.keys(e.cardio).length))); }
-export function kcalBurned(e) { let t = 0; if (e && e.cardio) Object.values(e.cardio).forEach(v => { t += Number(v) || 0; }); return t; }
-export function exerciseCount(e) { return (e.machines || []).length + Object.keys(e.cardio || {}).length; }
+export function isGymDay(e) { return !!(e && (e.gym || (e.machines && e.machines.length) || (e.cardio && Object.keys(e.cardio).length) || (e.cx && e.cx.length))); }
+export function kcalBurned(e) { let t = 0; if (e && e.cardio) Object.values(e.cardio).forEach(v => { t += Number(v) || 0; }); if (e && e.cx) e.cx.forEach(x => { t += Number(x.kcal) || 0; }); return t; }
+export function exerciseCount(e) { return (e.machines || []).length + Object.keys(e.cardio || {}).length + (e.cx || []).length; }
+
+/* ---------- (g) protein by weight or count ---------- */
+/** How a food is measured: grams if we know its serving weight, otherwise its unit (egg, scoop). */
+export function foodMeasure(f) { return f.gw ? { u: 'g', p: f.p / f.gw, k: f.k / f.gw } : { u: f.unit || 'serving', p: f.p, k: f.k }; }
+/** Protein and kcal for a quantity: e.g. 120 g paneer, or 2 scoops whey. */
+export function amountTotals(per, q) { q = Number(q) || 0; return { p: Math.round(per.p * q * 10) / 10, k: Math.round(per.k * q) }; }
+const cfTotals = list => (list || []).reduce((a, x) => { const t = amountTotals(x, x.q); return { p: a.p + t.p, k: a.k + t.k }; }, { p: 0, k: 0 });
+const cleanText = (v, max) => String(v == null ? '' : v).replace(/[\u0000-\u001f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
+export { cleanText };
+
+/* ---------- (a, b) plan a session to fit the time you have ---------- */
+/**
+ * Fit a session into `mins` minutes. Warm-up and cool-down are fixed; weights are chosen big-moves-first (RANK) until the
+ * time runs out, then put in order; cardio fills what's left up to the session's planned minutes (or at least 10).
+ * Returns { warm, cool, steps: [{id, start, dur}], cardio: {ids, start, dur}, coolStart, spare, skipped } or null.
+ */
+export function buildPlan(session, mins) {
+  mins = Number(mins); if (!session || session.rest || !mins || mins < 20) return null;
+  const ids = session.items || [], cardioIds = ids.filter(id => BY_ID[id] && BY_ID[id].g === 'cardio');
+  const lifts = ids.filter(id => BY_ID[id] && BY_ID[id].g !== 'cardio' && !BY_ID[id].paused)
+    .map((id, i) => ({ id, i, rank: RANK[id] || 5, dur: BY_ID[id].g === 'core' ? MINUTES.core : MINUTES.lift }));
+  const warm = mins >= 45 ? 10 : 5, cool = mins >= 45 ? 5 : 3, rem = mins - warm - cool;
+  const need = lifts.reduce((a, x) => a + x.dur, 0), byRank = [...lifts].sort((a, b) => a.rank - b.rank || a.i - b.i);
+  const pick = budget => { const out = []; byRank.forEach(x => { if (x.dur <= budget) { out.push(x); budget -= x.dur; } }); return out; };
+  let chosen, cardio;
+  if (session.cardioFocus) {
+    chosen = pick(Math.min(need, Math.max(8, Math.round(rem * 0.3))));
+    cardio = cardioIds.length ? rem - chosen.reduce((a, x) => a + x.dur, 0) : 0;
+  } else {
+    const minCardio = cardioIds.length ? Math.min(10, rem) : 0;
+    if (rem - minCardio >= need) { chosen = byRank; cardio = cardioIds.length ? Math.min(session.cardio || 40, rem - need) : 0; }
+    else { chosen = pick(rem - minCardio); cardio = cardioIds.length ? rem - chosen.reduce((a, x) => a + x.dur, 0) : 0; }
+  }
+  chosen = [...chosen].sort((a, b) => a.rank - b.rank || a.i - b.i);
+  // Cardio-focused days (Saturday) do the bike first, then core on the mat; other days lift first.
+  let t = warm, cardioBlock = null;
+  const addCardio = () => { if (cardio > 0) { cardioBlock = { ids: cardioIds, start: t, dur: cardio }; t += cardio; } };
+  if (session.cardioFocus) addCardio();
+  const steps = chosen.map(x => { const s = { id: x.id, rank: x.rank, start: t, dur: x.dur }; t += x.dur; return s; });
+  if (!session.cardioFocus) addCardio();
+  return { mins, warm, cool, steps, cardio: cardioBlock, coolStart: t, spare: mins - t - cool,
+    skipped: lifts.filter(x => !chosen.includes(x)).map(x => x.id) };
+}
+export const clock = m => Math.floor(m / 60) + ':' + pad(m % 60);
 
 /** Protein (g) and kcal for one meal, using current food values. */
 export function mealTotals(e, m) {
   let p = 0, k = 0; if (!e) return { p, k };
   const src = (e.meals && e.meals[m]) || {};
   Object.keys(src).forEach(f => { const food = FOOD_BY[f]; if (food) { const c = Number(src[f]) || 0; p += c * food.p; k += c * food.k; } });
+  const c = cfTotals(e.cf && e.cf[m]); p += c.p; k += c.k;
   p += Math.max(0, Number(e.extra && e.extra[m]) || 0);
   k += Math.max(0, Number(e.extraK && e.extraK[m]) || 0);
   return { p, k };
@@ -52,36 +97,49 @@ export function normalize(d) {
   d = ensure(clone(d));
   const out = { v: 2, gym: false, machines: [...new Set(d.machines.filter(id => BY_ID[id] && BY_ID[id].g !== 'cardio'))].sort(), cardio: {} };
   Object.keys(d.cardio).sort().forEach(k => { if (BY_ID[k] && BY_ID[k].g === 'cardio') out.cardio[k] = num(d.cardio[k], 0, 3000, 1); });
-  out.gym = !!(d.gym || out.machines.length || Object.keys(out.cardio).length);
+  const cx = (Array.isArray(d.cx) ? d.cx : []).slice(0, 15).map(x => {
+    const n = cleanText(x && x.n, 40); if (!n) return null; const o = { n };
+    const kg = num(x.kg, 0, 400, 0.5), reps = num(x.reps, 1, 200, 1), min = num(x.min, 1, 300, 1), kcal = num(x.kcal, 0, 3000, 1);
+    if (kg != null) o.kg = kg; if (reps != null) o.reps = reps; if (min != null) o.min = min; if (kcal) o.kcal = kcal; return o; }).filter(Boolean);
+  if (cx.length) out.cx = cx;
+  out.gym = !!(d.gym || out.machines.length || Object.keys(out.cardio).length || cx.length);
   const loads = {};
   out.machines.forEach(id => {
     const L = d.loads[id]; if (!L) return; const kind = BY_ID[id].load; if (!kind) return;
     const o = {};
     if (kind === 'time') { const s = num(L.sec, 1, 600, 1); if (s != null) o.sec = s; }
+    else if (kind === 'reps') { const r = num(L.reps, 1, 200, 1); if (r != null) o.reps = r; }
     else { const kg = num(L.kg, 0, 400, 0.5), reps = num(L.reps, 1, 60, 1); if (kg != null && !(L.sug && reps == null)) o.kg = kg; if (reps != null) o.reps = reps; } // a suggested weight only counts once reps are logged
     if (Object.keys(o).length) loads[id] = o;
   });
   if (Object.keys(loads).length) out.loads = loads;
   const knee = num(d.knee, 0, 2, 1); if (out.gym && knee != null) out.knee = knee;
-  const meals = {}, extra = {}, extraK = {};
+  const meals = {}, extra = {}, extraK = {}, cf = {};
   MEALS.forEach(m => {
     const src = d.meals[m.id] || {}, o = {};
     Object.keys(src).sort().forEach(f => { const c = num(src[f], 0, 20, 1); if (c && FOOD_BY[f]) o[f] = c; });
     if (Object.keys(o).length) meals[m.id] = o;
     const x = num(d.extra[m.id], 0, 300, 0.5); if (x) extra[m.id] = x;
     const xk = num(d.extraK[m.id], 0, 3000, 1); if (xk) extraK[m.id] = xk;
+    const list = (Array.isArray(d.cf[m.id]) ? d.cf[m.id] : []).slice(0, 20).map(x => {
+      const n = cleanText(x && x.n, 40), u = cleanText(x && x.u, 16) || 'serving', q0 = num(x && x.q, 0.1, 2000), q = q0 == null ? null : Math.round(q0 * 10) / 10, p = num(x && x.p, 0, 200), k = num(x && x.k, 0, 2000);
+      if (!n || q == null || p == null) return null;
+      const o = { n, u, q, p: Math.round(p * 1000) / 1000, k: Math.round((k || 0) * 1000) / 1000 };
+      return amountTotals(o, q).p <= 300 ? o : null; }).filter(Boolean);
+    if (list.length) cf[m.id] = list;
   });
   if (Object.keys(meals).length) out.meals = meals;
   if (Object.keys(extra).length) out.extra = extra;
   if (Object.keys(extraK).length) out.extraK = extraK;
+  if (Object.keys(cf).length) out.cf = cf;
   const veg = num(d.veg, 0, 15, 1); if (veg) out.veg = veg;
   const b = {}, w = num(d.body.weight, 30, 250, 0.1), wa = num(d.body.waist, 40, 200, 0.5), hip = num(d.body.hip, 50, 200, 0.5), bf = num(d.body.bf, 3, 70, 0.1), vf = num(d.body.vf, 1, 30, 1);
   if (w != null) b.weight = Math.round(w * 10) / 10; if (wa != null) b.waist = wa; if (hip != null) b.hip = hip; if (bf != null) b.bf = Math.round(bf * 10) / 10; if (vf != null) b.vf = vf;
   if (Object.keys(b).length) out.body = b;
-  if (out.meals || out.extra || out.extraK) out.t = dayTotals(out, { live: true });
+  if (out.meals || out.extra || out.extraK || out.cf) out.t = dayTotals(out, { live: true });
   return out;
 }
-export function isEmpty(n) { return !n.gym && !n.meals && !n.extra && !n.extraK && !n.body && !n.veg; }
+export function isEmpty(n) { return !n.gym && !n.meals && !n.extra && !n.extraK && !n.cf && !n.body && !n.veg; }
 export function sameDay(a, b) { return JSON.stringify(normalize(a || blank())) === JSON.stringify(normalize(b || blank())); }
 
 /** Most recent logged load for a machine strictly before `beforeKey`. */

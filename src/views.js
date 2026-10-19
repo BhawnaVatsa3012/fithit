@@ -1,6 +1,6 @@
 // Screens. Each function returns HTML for one part of the app; no saving or event handling here.
-import { GROUPS, GROUP_LABEL, MACHINES, BY_ID, CUES, PAIN_RULE, planFor, DAYNAMES, MUSCLES, DOW, MEALS, FOODS, FOOD_BY } from './catalogue.js';
-import { keyOf, parseKey, addDays, mondayOf, daysBetween, has, isGymDay, kcalBurned, exerciseCount, mealTotals, dayTotals, servings, lastLoad, nextStep, checkins, weeklyPace, latestWhr, strengthSummary, pad } from './model.js';
+import { GROUPS, GROUP_LABEL, MACHINES, BY_ID, CUES, PAIN_RULE, planFor, DAYNAMES, MUSCLES, DOW, MEALS, FOODS, FOOD_BY, RANK, RANK_WHY, GUIDE, demoLinks, CIRCUIT, PROGRESSION } from './catalogue.js';
+import { keyOf, parseKey, addDays, mondayOf, daysBetween, has, isGymDay, kcalBurned, exerciseCount, mealTotals, dayTotals, servings, lastLoad, nextStep, checkins, weeklyPace, latestWhr, strengthSummary, pad, buildPlan, clock, foodMeasure, amountTotals } from './model.js';
 import { S, auth, ui, today, draftFor, isDirty, viewOf, proteinGoal, mealTarget } from './state.js';
 
 export const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -20,7 +20,9 @@ const I = {
   dumbbell: '<path d="M17.596 12.768a2 2 0 1 0 2.829-2.829l-1.768-1.767a2 2 0 0 0 2.828-2.829l-2.828-2.828a2 2 0 0 0-2.829 2.828l-1.767-1.768a2 2 0 1 0-2.829 2.829z"/><path d="m2.5 21.5 1.4-1.4"/><path d="m20.1 3.9 1.4-1.4"/><path d="M5.343 21.485a2 2 0 1 0 2.829-2.828l1.767 1.768a2 2 0 1 0 2.829-2.829l-6.364-6.364a2 2 0 1 0-2.829 2.829l1.768 1.767a2 2 0 0 0-2.828 2.829z"/><path d="m9.6 14.4 4.8-4.8"/>',
   activity: '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
   calendar: '<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
-  utensils: '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>' };
+  utensils: '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>',
+  book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>', x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  ext: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>', clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>' };
 const CHECK = '<span class="cb on">' + svg(I.check, 18, 3) + '</span>', BOX = '<span class="cb"></span>';
 
 function ringSvg(week, o) {
@@ -52,6 +54,10 @@ function loadRow(m, d) {
     return '<div class="ld"><label class="lf"><span class="sr">Seconds held for ' + esc(m.name) + '</span><input class="inp v sm num" type="number" inputmode="numeric" min="1" max="600" placeholder="0" data-load="' + m.id + '" data-f="sec" value="' + val(L.sec) + '"></label><span class="unit">sec</span>' +
       '<span class="cue grow">' + (last && last.sec ? 'Last: ' + last.sec + ' s (' + shortDate(last.key) + ')' : 'First time logging') + '</span></div>';
   }
+  if (m.load === 'reps') {
+    return '<div class="ld"><label class="lf"><span class="sr">Reps for ' + esc(m.name) + '</span><input class="inp v sm num" type="number" inputmode="numeric" min="1" max="200" placeholder="0" data-load="' + m.id + '" data-f="reps" value="' + val(L.reps) + '"></label><span class="unit">reps</span>' +
+      '<span class="cue grow">' + (last && last.reps ? 'Last: ' + last.reps + ' reps (' + shortDate(last.key) + ')' : 'First time logging') + '</span></div>';
+  }
   const step = nextStep(last);
   return '<div class="ld"><label class="lf"><span class="sr">Weight in kg for ' + esc(m.name) + '</span><input class="inp v sm num" type="number" inputmode="decimal" step="0.5" min="0" max="400" placeholder="kg" data-load="' + m.id + '" data-f="kg" value="' + val(L.kg) + '"></label><span class="unit">kg \u00d7</span>' +
     '<label class="lf"><span class="sr">Reps for ' + esc(m.name) + '</span><input class="inp v sm num" type="number" inputmode="numeric" min="1" max="60" placeholder="reps" data-load="' + m.id + '" data-f="reps" value="' + val(L.reps) + '"></label><span class="unit">reps</span></div>' +
@@ -65,7 +71,50 @@ function itemRow(m, cue, num, d) {
     (text ? '<span class="cue">' + esc(text) + '</span>' : '') + '</span>' + (on ? CHECK : BOX) + '</button>';
   if (isC && on) { const v = d.cardio[m.id]; h += '<label class="kc' + (num ? '' : ' np') + '"><span style="color:var(--ember);display:grid">' + svg(I.flame, 16) + '</span><span class="grow">Calories from the screen</span><input class="inp num" type="number" inputmode="numeric" min="0" max="3000" placeholder="0" data-kcal="' + m.id + '" value="' + val(v) + '" aria-label="Calories from ' + esc(m.name) + '"><span class="unit">kcal</span></label>'; }
   if (!isC && on && m.load) h += '<div class="ldw' + (num ? '' : ' np') + '">' + loadRow(m, d) + '</div>';
+  if (GUIDE[m.id]) { const open = ui.howOpen === m.id;
+    h += '<div class="how' + (num ? '' : ' np') + '"><button class="lnk" data-how="' + m.id + '" aria-expanded="' + open + '">' + (open ? 'Hide how-to' : 'How to do it') + '</button>' + (open ? guidePanel(m) : '') + '</div>'; }
   return h + '</div>';
+}
+/** (c, d, e) Set-up, steps, the mistake to avoid, and demo links for one exercise. */
+export function guidePanel(m) {
+  const g = GUIDE[m.id], L = demoLinks(m.name.replace(/\s*\(.*\)$/, ''));
+  return '<div class="gp"><div class="gp-k">Set up</div><p>' + esc(g.s) + '</p><div class="gp-k">Do it</div><ol>' + g.st.map(x => '<li>' + esc(x) + '</li>').join('') + '</ol>' +
+    (CUES[m.id] ? '<div class="gp-k">Your cue</div><p class="vt">' + esc(CUES[m.id]) + '</p>' : '') +
+    '<div class="gp-k">Avoid</div><p>' + esc(g.a) + '</p>' +
+    '<div class="gp-l"><a href="' + L.video + '" target="_blank" rel="noopener noreferrer">Watch a demo ' + svg(I.ext, 14) + '</a><a href="' + L.pics + '" target="_blank" rel="noopener noreferrer">See pictures ' + svg(I.ext, 14) + '</a></div>' +
+    '<p class="fine" style="margin-top:8px">Links open a search on YouTube or Google Images. Pick a video from a qualified trainer and follow your own cue above if they differ.</p></div>';
+}
+/* ---------- (a, b) plan the session to the time you have ---------- */
+const MIN_CHOICES = [30, 45, 60, 75, 90, 120], MIN_LABEL = { 30: '30 min', 45: '45 min', 60: '1 hr', 75: '1\u00bc hr', 90: '1\u00bd hr', 120: '2 hr' };
+function planCard(p, plan) {
+  let h = '<section class="pad"><div class="card plan"><div class="kick v">' + svg(I.clock, 14) + ' Plan your time</div><p class="cue" style="margin-top:6px">How long can you stay today? FitHit fits the session in and puts it in the right order.</p>' +
+    '<div class="chips" role="radiogroup" aria-label="Minutes at the gym today">' + MIN_CHOICES.map(n => '<button role="radio" aria-checked="' + (ui.mins === n) + '" data-mins="' + n + '">' + MIN_LABEL[n] + '</button>').join('') + '</div>';
+  if (!plan) return h + '</div></section>';
+  const row = (t, n, title, sub, cls) => '<li class="tl' + (cls ? ' ' + cls : '') + '"><span class="tl-t num">' + clock(t) + '</span><span class="grow"><b>' + (n ? '<span class="tl-n num">' + n + '</span>' : '') + esc(title) + '</b><span class="cue">' + sub + '</span></span></li>';
+  h += '<ol class="tlist">' + row(0, '', 'Warm-up \u00b7 ' + plan.warm + ' min', 'Easy pace on a bike or the cross trainer. Gets blood to the muscles and loosens the knee.');
+  let lastRank = 0;
+  const cardioRow = () => plan.cardio ? row(plan.cardio.start, '', 'Cardio \u00b7 ' + plan.cardio.dur + ' min', esc(plan.cardio.ids.map(id => BY_ID[id].name).join(' or ')) + (p.cardioFocus ? '. ' + esc((p.cues && p.cues[plan.cardio.ids[0]]) || '') : '. After weights, so you lift with full energy.')) : '';
+  if (p.cardioFocus) h += cardioRow();
+  plan.steps.forEach((s, i) => { const m = BY_ID[s.id], why = s.rank !== lastRank ? ' \u00b7 ' + RANK_WHY[s.rank] : ''; lastRank = s.rank;
+    h += row(s.start, pad(i + 1), m.name + ' \u00b7 ' + s.dur + ' min', (m.g === 'core' ? '2\u20133 rounds' : PROGRESSION.sets + ' sets \u00d7 ' + PROGRESSION.repBottom + '\u2013' + PROGRESSION.repTop + ', 60 s rest') + esc(why)); });
+  if (!p.cardioFocus) h += cardioRow();
+  h += row(plan.coolStart, '', 'Stretch \u00b7 ' + plan.cool + ' min', 'Chest, upper back, calves and hamstrings, 20\u201330 s each. See Guide.') + '</ol>';
+  if (plan.skipped.length) h += '<p class="msg">Left out to fit ' + plan.mins + ' min: ' + esc(plan.skipped.map(id => BY_ID[id].name).join(', ')) + '. Do them first next time, or on a longer day.</p>';
+  if (plan.spare >= 10) h += '<p class="msg">' + plan.spare + ' min spare. Add the <button class="lnk" data-tab="guide">endurance circuit</button> (about 17 min) or stretch longer.</p>';
+  return h + '</div></section>';
+}
+function customExercises(d) {
+  const names = [...new Set(Object.values(S.entries).flatMap(e => (e && e.cx ? e.cx.map(x => x.n) : [])))].slice(0, 30), f = ui.cx;
+  let h = '<section class="sec"><div class="sec-h"><h2>Your own exercise</h2><span class="cap">Anything not on the lists</span></div>';
+  if (d.cx.length) h += '<div class="list" style="margin-bottom:12px">' + d.cx.map((x, i) => '<div class="row on"><div class="fr"><span class="grow"><span class="nm"><b>' + esc(x.n) + '</b></span><span class="cue">' +
+    esc([x.kg != null && x.kg !== '' ? x.kg + ' kg' : '', x.reps ? x.reps + ' reps' : '', x.min ? x.min + ' min' : '', x.kcal ? x.kcal + ' kcal' : ''].filter(Boolean).join(' \u00b7 ') || 'Done') +
+    '</span></span><button class="ib" data-cxdel="' + i + '" aria-label="Remove ' + esc(x.n) + '">' + svg(I.x, 18) + '</button></div></div>').join('') + '</div>';
+  const n = (k, label, unit, max, step) => '<label class="bf"><span>' + label + '</span><span class="bfi"><input class="inp v sm num" type="number" inputmode="decimal" min="0" max="' + max + '" step="' + step + '" placeholder="\u2013" data-cx="' + k + '" value="' + val(f[k]) + '"><span class="unit">' + unit + '</span></span></label>';
+  h += '<div class="card cal"><label class="field" style="margin-top:0"><span>Exercise name</span><input class="email" type="text" maxlength="40" list="cx-names" placeholder="For example: Kettlebell swing" data-cx="n" value="' + val(f.n) + '"></label>' +
+    '<datalist id="cx-names">' + names.map(x => '<option value="' + esc(x) + '">').join('') + '</datalist>' +
+    '<div class="bgrid">' + n('kg', 'Weight', 'kg', 400, 0.5) + n('reps', 'Reps', 'reps', 200, 1) + n('min', 'Time', 'min', 300, 1) + n('kcal', 'Calories', 'kcal', 3000, 1) + '</div>' +
+    '<p class="fine">Fill in only what applies. Name is enough to count it.</p><button class="save full" data-act="cxadd"' + (String(f.n || '').trim() ? '' : ' disabled') + '>Add exercise</button></div></section>';
+  return h;
 }
 function kneeBlock(d) {
   const opts = [[0, 'Fine'], [1, 'Some discomfort'], [2, 'Had to stop']];
@@ -75,7 +124,13 @@ function kneeBlock(d) {
 }
 export function logView(D) {
   const d = draftFor(ui.selected), dow = parseKey(ui.selected).getDay(), p = planFor(dow, S.settings.restDow), ids = p.items || [];
-  const items = ids.map((id, i) => ({ m: BY_ID[id], cue: (p.cues && p.cues[id]) || CUES[id] || '', num: pad(i + 1) }));
+  const plan = buildPlan(p, ui.mins);
+  // (b) always in a sensible order: big moves, smaller, arms, core, then cardio. With a time plan, planned items first.
+  const rank = id => BY_ID[id].g === 'cardio' ? 9 : (RANK[id] || 5);
+  let ordered = ids.map((id, i) => ({ id, i })).sort((a, b) => rank(a.id) - rank(b.id) || a.i - b.i).map(x => x.id);
+  if (plan) { const lifts = plan.steps.map(s => s.id), cardio = plan.cardio ? plan.cardio.ids : [], first = p.cardioFocus ? cardio.concat(lifts) : lifts.concat(cardio); ordered = first.concat(ordered.filter(id => !first.includes(id))); }
+  else if (p.cardioFocus) ordered = ordered.filter(id => BY_ID[id].g === 'cardio').concat(ordered.filter(id => BY_ID[id].g !== 'cardio'));
+  const items = ordered.map((id, i) => ({ m: BY_ID[id], cue: (plan && plan.skipped.includes(id) ? 'Left out today to fit your time. ' : '') + ((p.cues && p.cues[id]) || CUES[id] || ''), num: pad(i + 1) }));
   const isOn = m => m.g === 'cardio' ? has(d.cardio, m.id) : d.machines.includes(m.id);
   const done = items.filter(x => isOn(x.m)).length;
   const extra = d.machines.some(id => !ids.includes(id)) || Object.keys(d.cardio).some(id => !ids.includes(id));
@@ -88,13 +143,14 @@ export function logView(D) {
     items.map(x => '<span' + (isOn(x.m) ? ' class="on"' : '') + '></span>').join('') + '</div></div>';
   h += '</section><div class="pad"><button class="gym' + (gymOn ? ' on' : '') + '" data-act="gym" aria-pressed="' + gymOn + '"><span style="color:var(--volt);display:grid">' + svg(I.dumbbell, 22) + '</span>' +
     '<span class="grow"><span class="gym-t">Went to the gym</span><span class="sub">' + (gymOn ? 'Counts toward your week' : 'Tick even if you only did a few machines') + '</span></span>' + (gymOn ? CHECK : BOX) + '</button>' + (gymOn ? kneeBlock(d) : '') + '</div>';
-  if (ids.length) h += '<section class="sec"><div class="sec-h"><h2>Programme</h2><span class="cap">Tap to tick off, then log the weight</span></div><div class="list">' + items.map(x => itemRow(x.m, x.cue, x.num, d)).join('') + '</div></section>';
+  if (!p.rest && ids.length) h += planCard(p, plan);
+  if (ids.length) h += '<section class="sec"><div class="sec-h"><h2>Programme</h2><span class="cap">Tap to tick off, then log the weight</span></div><p class="cue" style="margin:-6px 0 14px">In this order: big moves \u2192 smaller muscles \u2192 arms \u2192 core \u2192 cardio. Tap <b>How to do it</b> on any exercise.</p><div class="list">' + items.map(x => itemRow(x.m, x.cue, x.num, d)).join('') + '</div></section>';
   const groups = GROUPS.map(g => ({ g, items: MACHINES.filter(m => m.g === g.id && !ids.includes(m.id)) })).filter(x => x.items.length);
   const total = groups.reduce((a, x) => a + x.items.length, 0);
   h += '<section class="pad" style="margin-top:32px"><button class="disc" data-act="others" aria-expanded="' + !!open + '"><span class="t">' + (ids.length ? 'Other exercises' : 'All exercises') + '</span><span class="cap">' + total + ' available</span><span class="chev">' + svg(I.down, 18) + '</span></button>';
   if (open) h += groups.map(x => '<div class="grp"><div class="kick v">' + x.g.label + '</div>' + (x.g.hint ? '<div class="cap" style="margin-top:2px">' + x.g.hint + '</div>' : '') +
     '<div class="list">' + x.items.map(m => itemRow(m, CUES[m.id] || '', '', d)).join('') + '</div></div>').join('');
-  return h + '</section>';
+  return h + '</section>' + customExercises(d);
 }
 export function mealsSummary(d) {
   const t = dayTotals(d, { live: true }), goal = proteinGoal(), left = goal - t.p, kt = S.settings.kcalTarget;
@@ -118,6 +174,46 @@ function foodRow(f, d) {
     '<span class="step"><button data-dec="' + f.id + '" aria-label="Remove a serving of ' + esc(f.name) + '"' + (c ? '' : ' disabled') + '>' + svg(I.minus, 18, 2.5) + '</button>' +
     '<b class="num" aria-hidden="true">' + c + '</b><button class="plus" data-inc="' + f.id + '" aria-label="Add a serving of ' + esc(f.name) + ' (now ' + c + ')">' + svg(I.plus, 18, 2.5) + '</button></span></div></div>';
 }
+/* ---------- (f, g) weigh it, count it, or add your own food ---------- */
+export function calcFoods() {
+  const built = FOODS.map(f => ({ key: 'b:' + f.id, name: f.name, ...foodMeasure(f) }));
+  const mine = (S.settings.myFoods || []).map((f, i) => ({ key: 'm:' + i, name: f.n, u: f.u, p: f.p, k: f.k, mine: true }));
+  return { built, mine, all: built.concat(mine) };
+}
+const unitWord = (u, q) => u === 'g' ? 'g' : (Number(q) === 1 ? u : u + (/(s|ch)$/.test(u) ? 'es' : 's'));
+export function calcResult() {
+  const c = ui.calc, F = calcFoods();
+  if (c.food === 'new') { const q = Number(c.qty), per = { p: Number(c.p), k: Number(c.k) || 0 };
+    if (!String(c.n || '').trim() || !(per.p >= 0) || c.p === '' || !(q > 0)) return { ok: false, text: 'Fill in the name, protein per ' + (c.u || 'serving') + ' and how many you had.' };
+    const t = amountTotals(per, q); return { ok: true, t, text: q + ' ' + unitWord(c.u || 'serving', q) + ' of ' + c.n + ' = <b>' + fmtG(t.p) + ' g protein</b> \u00b7 ' + fmt(t.k) + ' kcal' }; }
+  const f = F.all.find(x => x.key === c.food); if (!f) return { ok: false, text: '' };
+  const q = Number(c.qty); if (!(q > 0)) return { ok: false, text: f.u === 'g' ? 'Type how many grams. Example: 120 g ' + f.name.toLowerCase() + ' = ' + fmtG(amountTotals(f, 120).p) + ' g protein.' : 'Type how many. Example: 2 ' + unitWord(f.u, 2) + ' = ' + fmtG(amountTotals(f, 2).p) + ' g protein.' };
+  const t = amountTotals(f, q); return { ok: true, t, f, text: q + ' ' + unitWord(f.u, q) + ' ' + esc(f.name.toLowerCase()) + ' = <b>' + fmtG(t.p) + ' g protein</b> \u00b7 ' + fmt(t.k) + ' kcal' };
+}
+function foodCalc(d, meal) {
+  const c = ui.calc, F = calcFoods(), list = d.cf[ui.meal] || [], sel = F.all.find(x => x.key === c.food), isNew = c.food === 'new';
+  const opt = x => '<option value="' + x.key + '"' + (x.key === c.food ? ' selected' : '') + '>' + esc(x.name) + ' (per ' + (x.u === 'g' ? 'gram' : esc(x.u)) + ')</option>';
+  let h = '<div class="grp"><div class="kick v">Weigh it, count it, or add your own</div><div class="cap" style="margin-top:2px">FitHit works out the protein. Example: 2 scoops of whey, or 120 g paneer.</div>';
+  if (list.length) h += '<div class="list">' + list.map((x, i) => { const t = amountTotals(x, x.q);
+    return '<div class="row on"><div class="fr"><span class="grow"><span class="nm"><b>' + esc(x.n) + '</b></span><span class="cue">' + fmtG(t.p) + ' g protein \u00b7 ' + fmt(t.k) + ' kcal</span></span>' +
+      '<label class="lf"><span class="sr">Amount of ' + esc(x.n) + '</span><input class="inp v sm num" type="number" inputmode="decimal" min="0.1" max="2000" step="any" data-cfq="' + i + '" value="' + val(x.q) + '"></label><span class="unit">' + esc(unitWord(x.u, x.q)) + '</span>' +
+      '<button class="ib" data-cfdel="' + i + '" aria-label="Remove ' + esc(x.n) + '">' + svg(I.x, 18) + '</button></div></div>'; }).join('') + '</div>';
+  h += '<div class="card cal" style="margin-top:12px"><label class="bf"><span>Food</span><select class="inp v sel" data-calc="food">' +
+    '<optgroup label="FitHit foods">' + F.built.map(opt).join('') + '</optgroup>' + (F.mine.length ? '<optgroup label="My foods">' + F.mine.map(opt).join('') + '</optgroup>' : '') +
+    '<option value="new"' + (isNew ? ' selected' : '') + '>+ A new food from its label\u2026</option></select></label>';
+  if (isNew) {
+    const t = (k, label, ph, max) => '<label class="bf"><span>' + label + '</span><input class="email" type="text" maxlength="' + max + '" placeholder="' + ph + '" data-calc="' + k + '" value="' + val(c[k]) + '"></label>';
+    const n = (k, label, unit) => '<label class="bf"><span>' + label + '</span><span class="bfi"><input class="inp v sm num" type="number" inputmode="decimal" min="0" max="2000" step="any" placeholder="\u2013" data-calc="' + k + '" value="' + val(c[k]) + '"><span class="unit">' + unit + '</span></span></label>';
+    h += '<div class="bgrid">' + t('n', 'Name', 'My whey', 40) + t('u', 'One serving is a\u2026', 'scoop', 16) + n('p', 'Protein per ' + esc(c.u || 'serving'), 'g') + n('k', 'Calories per ' + esc(c.u || 'serving'), 'kcal') + '</div>' +
+      '<label class="chk"><input type="checkbox" data-calc="save"' + (c.save ? ' checked' : '') + '> Save to My foods for next time</label>';
+  }
+  const unit = isNew ? (c.u || 'serving') : sel ? sel.u : 'serving';
+  h += '<label class="bf" style="margin-top:12px"><span>' + (unit === 'g' ? 'How many grams' : 'How many ' + esc(unitWord(unit, 2))) + '</span><span class="bfi"><input class="inp v sm num" type="number" inputmode="decimal" min="0.1" max="2000" step="any" placeholder="' + (unit === 'g' ? '120' : '1') + '" data-calc="qty" value="' + val(c.qty) + '"><span class="unit">' + esc(unitWord(unit, 2)) + '</span></span></label>' +
+    '<p class="msg" id="calc-res" aria-live="polite">' + calcResult().text + '</p>' +
+    '<button class="save full" id="calc-add" data-act="calcadd"' + (calcResult().ok ? '' : ' disabled') + '>Add to ' + meal.label.toLowerCase() + '</button>' +
+    (sel && sel.mine ? '<button class="lnk" style="margin-top:12px" data-act="myfooddel">Remove ' + esc(sel.name) + ' from My foods</button>' : '') + '</div></div>';
+  return h;
+}
 export function proteinWeek(D) {
   const selMon = mondayOf(parseKey(ui.selected)), goal = proteinGoal(), top = Math.max(goal * 1.2, 1); let out = '';
   for (let i = 0; i < 7; i++) { const k = keyOf(addDays(selMon, i)), e = k === ui.selected ? draftFor(k) : S.entries[k], g = dayTotals(e, { live: k === ui.selected }).p, fut = k > D.TODAY;
@@ -133,13 +229,14 @@ export function mealsView(D) {
   if (yMeal && curEmpty) h += '<button class="disc cp" data-act="copymeal">' + svg(I.copy, 18) + '<span class="grow"><span class="t">Same as yesterday</span><span class="cap">' + esc(Object.keys(yMeal).map(f => yMeal[f] + ' \u00d7 ' + FOOD_BY[f].name.toLowerCase()).join(', ')) + '</span></span></button>';
   h += '<div class="kick v" style="margin-top:' + (yMeal && curEmpty ? 22 : 0) + 'px">Protein foods</div><div class="list" style="margin-top:12px">' + FOODS.filter(f => f.grp === 'p').map(f => foodRow(f, d)).join('') + '</div>';
   h += '<div class="grp"><div class="kick v">Everyday staples</div><div class="cap" style="margin-top:2px">Smaller amounts of protein, but they carry most of the calories.</div><div class="list">' + FOODS.filter(f => f.grp === 'e').map(f => foodRow(f, d)).join('') + '</div></div>';
+  h += foodCalc(d, meal);
   const ex = d.extra[ui.meal], exk = d.extraK[ui.meal];
-  h += '<div class="grp"><div class="kick v">Something else</div><div class="list"><div class="row' + (Number(ex) > 0 || Number(exk) > 0 ? ' on' : '') + '"><div class="kc np" style="padding-top:16px;flex-wrap:wrap">' +
+  h += '<div class="grp"><div class="kick v">Quick add: just the totals</div><div class="list"><div class="row' + (Number(ex) > 0 || Number(exk) > 0 ? ' on' : '') + '"><div class="kc np" style="padding-top:16px;flex-wrap:wrap">' +
     '<span class="grow" style="color:var(--tx);min-width:100%"><b style="display:block;font-weight:600;font-size:15.5px">From a label or another dish</b><span class="cue">For example, a whey scoop: 24 g protein, 120 kcal</span></span>' +
     '<label class="lf"><span class="sr">Extra protein in grams</span><input class="inp v sm num" type="number" inputmode="decimal" min="0" max="300" placeholder="0" data-extra="' + ui.meal + '" value="' + val(ex) + '"></label><span class="unit">g</span>' +
     '<label class="lf"><span class="sr">Extra calories</span><input class="inp sm num" type="number" inputmode="numeric" min="0" max="3000" placeholder="0" data-extrak="' + ui.meal + '" value="' + val(exk) + '"></label><span class="unit">kcal</span></div></div></div></div></section>';
   h += '<section class="sec"><div class="card cal"><div class="sec-h" style="margin:0"><h2 style="font-size:22px">Protein this week</h2><span class="cap" style="white-space:nowrap">Line: ' + proteinGoal() + ' g</span></div><div class="pw" id="m-week">' + proteinWeek(D) + '</div>' +
-    '<p class="fine">Values are estimates for home-cooked portions. Ghee or oil adds about 45 kcal per teaspoon. For anything packaged, use Something else and copy its label.</p></div></section>';
+    '<p class="fine">Values are estimates for home-cooked portions. Ghee or oil adds about 45 kcal per teaspoon. For anything packaged, add it as a new food from its label.</p></div></section>';
   return h;
 }
 export function saveBar() {
@@ -254,8 +351,31 @@ export function calendarView(D) {
       return '<button class="rs" data-day="' + k + '"><span class="rs-d"><b>' + dd.getDate() + '</b><span>' + dd.toLocaleDateString('en-GB', { weekday: 'short' }) + '</span></span><span class="grow"><b style="display:block;font-weight:600;font-size:15px">' + (pp.rest ? 'Extra session' : esc(pp.title)) + '</b><span class="cap">' + (cc ? plural(cc, 'exercise') : 'Checked in') + (kk ? ' \u00b7 ' + kk + ' kcal' : '') + (e.knee ? ' \u00b7 knee: ' + (e.knee === 2 ? 'stopped' : 'discomfort') : '') + '</span></span><span style="color:var(--mu);display:grid">' + svg(I.right, 18) + '</span></button>'; }).join('') + '</div></section>';
   return h;
 }
+/* ---------- Guide tab: beginner basics, every machine, free weights, functional circuit ---------- */
+const BASICS = [
+  ['How a session flows', 'Warm-up 5\u201310 min \u2192 big machines \u2192 smaller muscles \u2192 arms \u2192 core \u2192 cardio \u2192 stretch 5 min. On the Log tab, pick how long you have and FitHit lays this out with clock times.'],
+  ['Sets, reps and rest', 'Example: \u201c3 \u00d7 12, 60 s rest\u201d means lift 12 times, rest 60 seconds, and do that 3 times. One exercise takes about 6 minutes.'],
+  ['Picking a weight', 'Choose a weight where the last 2\u20133 reps are hard but still clean. Example: if 12 reps at 15 kg feel easy and you could do 5 more, try 17.5 kg next set.'],
+  ['Getting stronger', 'Stay on a weight until you reach ' + PROGRESSION.repTop + ' reps in every set, then go up one step. Example: 20 kg \u00d7 15 this week \u2192 22.5 kg \u00d7 12 next week. FitHit suggests this for you.'],
+  ['Breathing', 'Breathe out on the effort (pushing or pulling), breathe in on the way back. Never hold your breath.'],
+  ['Pain', PAIN_RULE + ' Discomfort from effort is normal; joint pain is not.'],
+  ['Busy machine?', 'Swap for one that works the same muscle: chest press \u2194 dumbbell bench press, lat pulldown \u2194 one-arm dumbbell row, shoulder press \u2194 seated dumbbell press.']];
+const STRETCHES = [['Chest', 'Forearm on a door frame or pillar, step through gently.'], ['Upper back', 'Hold a rail at chest height, sit back and let your arms stretch long.'],
+  ['Calves', 'Hands on a wall, one leg back, heel pressed down.'], ['Hamstrings', 'Sit on a bench, one leg straight along it, lean forward from the hips with a straight back.']];
+export function guideView() {
+  let h = '<section class="card sess"><div class="kick">Guide</div><h1>New to the gym? Start here</h1><p class="note">Basics first, then how to use every machine, free-weight and functional exercise. The same how-to opens from each exercise on the Log tab.</p></section>';
+  h += '<section class="sec"><div class="sec-h"><h2>Basics</h2></div><div class="list">' + BASICS.map(b => '<div class="card mu"><b class="gb">' + esc(b[0]) + '</b><p class="msg" style="margin-top:6px">' + esc(b[1]) + '</p></div>').join('') + '</div></section>';
+  const c = CIRCUIT, per = c.items.length * (c.work + c.rest), total = Math.round((per * c.rounds + c.roundRest * (c.rounds - 1)) / 60);
+  h += '<section class="sec" id="circuit"><div class="sec-h"><h2>' + c.title + '</h2><span class="cap">About ' + total + ' min</span></div><div class="card cal"><p class="msg" style="margin-top:0">' + c.rounds + ' rounds. Each move: ' + c.work + ' s work, ' + c.rest + ' s rest. Rest ' + c.roundRest + ' s between rounds.</p><ol class="tlist">' +
+    c.items.map((id, i) => '<li class="tl"><span class="tl-t num">' + pad(i + 1) + '</span><span class="grow"><b>' + esc(BY_ID[id].name) + '</b><span class="cue">' + esc(CUES[id] || '') + '</span></span></li>').join('') + '</ol><p class="fine">' + esc(c.why) + ' Do it after weights instead of part of the cardio, or on its own on a short day. Log each move under Functional & endurance on the Log tab.</p></div></section>';
+  GROUPS.forEach(g => { const items = MACHINES.filter(m => m.g === g.id && GUIDE[m.id]);
+    h += '<section class="sec"><div class="sec-h"><h2>' + esc(g.label) + '</h2><span class="cap">' + items.length + ' exercises</span></div><div class="list">' +
+      items.map(m => '<details class="gd"><summary><span class="grow"><b>' + esc(m.name) + '</b>' + (m.paused ? '<span class="tag e">Paused</span>' : '') + '<span class="cue">' + esc(CUES[m.id] || m.paused || '') + '</span></span><span class="chev">' + svg(I.down, 18) + '</span></summary>' + guidePanel(m) + '</details>').join('') + '</div></section>'; });
+  h += '<section class="sec"><div class="sec-h"><h2>Cool-down stretches</h2><span class="cap">20\u201330 s each, no bouncing</span></div><div class="list">' + STRETCHES.map(x => '<div class="card mu"><b class="gb">' + x[0] + '</b><p class="msg" style="margin-top:6px">' + esc(x[1]) + '</p></div>').join('') + '</div></section>';
+  return h;
+}
 export function navHtml() {
-  return [['log', 'Log', I.dumbbell], ['meals', 'Meals', I.utensils], ['progress', 'Progress', I.activity], ['calendar', 'Calendar', I.calendar]]
+  return [['log', 'Log', I.dumbbell], ['meals', 'Meals', I.utensils], ['guide', 'Guide', I.book], ['progress', 'Progress', I.activity], ['calendar', 'Calendar', I.calendar]]
     .map(x => '<button data-tab="' + x[0] + '"' + (ui.tab === x[0] ? ' aria-current="page"' : '') + '>' + svg(x[2], 22) + x[1] + '</button>').join('');
 }
 export function authView() {

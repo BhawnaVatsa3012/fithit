@@ -1,9 +1,9 @@
 import './style.css';
 import { BY_ID, planFor, MEALS, DEFAULT_SETTINGS } from './catalogue.js';
-import { keyOf, parseKey, addDays, has, clone, ensure, normalize, isEmpty, isGymDay, exerciseCount, lastLoad, nextStep } from './model.js';
+import { keyOf, parseKey, addDays, has, clone, ensure, normalize, isEmpty, isGymDay, exerciseCount, lastLoad, nextStep, cleanText } from './model.js';
 import { sb, claim, loadAll, saveDay, loadSettings, saveSettings, exportAll, deleteAll, cache, draftStore, clearDevice } from './store.js';
-import { S, auth, ui, today, draftFor, isDirty, anyDirty, viewOf, persistDrafts, derive } from './state.js';
-import { header, switcher, logView, mealsSummary, mealTiles, proteinWeek, mealsView, saveBar, progressView, calendarView, navHtml, authView } from './views.js';
+import { S, auth, ui, today, draftFor, isDirty, anyDirty, viewOf, persistDrafts, derive, rememberMins } from './state.js';
+import { header, switcher, logView, mealsSummary, mealTiles, proteinWeek, mealsView, saveBar, progressView, calendarView, navHtml, authView, guideView, calcResult, calcFoods } from './views.js';
 
 /* ---------------- render ---------------- */
 function render() {
@@ -15,10 +15,11 @@ function render() {
   const D = derive(); let h = header(D);
   if (ui.tab === 'log' || ui.tab === 'meals') h += switcher(D) + (ui.tab === 'log' ? logView(D) : mealsView(D)) + '<div class="bar" id="bar">' + saveBar() + '</div>';
   else if (ui.tab === 'progress') h += progressView(D);
+  else if (ui.tab === 'guide') h += guideView();
   else h += calendarView(D);
   root.innerHTML = h; nav.innerHTML = navHtml();
 }
-const FOCUS_KEYS = ['m', 'inc', 'dec', 'meal', 'act', 'tab', 'day', 'kcal', 'extra', 'extrak', 'knee', 'veg', 'body', 'set'];
+const FOCUS_KEYS = ['m', 'inc', 'dec', 'meal', 'act', 'tab', 'day', 'kcal', 'extra', 'extrak', 'knee', 'veg', 'body', 'set', 'mins', 'how', 'cx', 'calc', 'cfq'];
 function rerender() {
   const a = document.activeElement; let sel = null;
   if (a && a.dataset) FOCUS_KEYS.some(k => { if (a.dataset[k] != null) { sel = '[data-' + k + '="' + a.dataset[k] + '"]' + (a.dataset.f ? '[data-f="' + a.dataset.f + '"]' : ''); return true; } return false; });
@@ -30,6 +31,8 @@ function partial() {
   const d = draftFor(ui.selected), b = document.getElementById('bar'); if (b) b.innerHTML = saveBar();
   if (ui.tab === 'meals') { const s = document.getElementById('m-sum'); if (s) s.innerHTML = mealsSummary(d); const t = document.getElementById('m-tiles'); if (t) t.innerHTML = mealTiles(d); const w = document.getElementById('m-week'); if (w) w.innerHTML = proteinWeek(derive()); }
   const bs = document.getElementById('body-save'); if (bs) bs.disabled = !(isDirty(today()) && !S.saving);
+  const cr = document.getElementById('calc-res'); if (cr) { const r = calcResult(); cr.innerHTML = r.text; const b = document.getElementById('calc-add'); if (b) b.disabled = !r.ok; }
+  const ca = document.querySelector('[data-act="cxadd"]'); if (ca) ca.disabled = !String(ui.cx.n || '').trim();
 }
 let toastT;
 function toast(msg, long) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), long ? 6000 : 2600); }
@@ -93,6 +96,25 @@ async function doSaveSettings() {
   if (r.error) { toast('Couldn\u2019t save settings: ' + r.error.message, true); return; }
   S.settings = next; ui.sd = null; cache.set(auth.user.id, S.entries, S.meta, S.settings); rerender(); toast('Settings saved');
 }
+/* ---------- My foods (saved with your settings, so they follow you to any device) ---------- */
+async function saveMyFoods(list) {
+  const r = await saveSettings(auth.user.id, { ...S.settings, myFoods: list });
+  if (r.error) { toast('Couldn\u2019t save to My foods: ' + r.error.message, true); return false; }
+  S.settings = { ...S.settings, myFoods: list }; cache.set(auth.user.id, S.entries, S.meta, S.settings); return true;
+}
+function addCalcFood() {
+  const c = ui.calc, r = calcResult(); if (!r.ok) return;
+  const d = draftFor(ui.selected), q = Math.round(Number(c.qty) * 10) / 10; let item;
+  if (c.food === 'new') {
+    item = { n: cleanText(c.n, 40), u: cleanText(c.u, 16) || 'serving', q, p: Number(c.p), k: Number(c.k) || 0 };
+    if (!item.n || !(item.p >= 0 && item.p <= 200) || !(item.k >= 0 && item.k <= 2000)) { toast('Check the protein and calories per serving.', true); return; }
+    if (c.save) { const mine = (S.settings.myFoods || []).filter(f => f.n.toLowerCase() !== item.n.toLowerCase()).concat([{ n: item.n, u: item.u, p: item.p, k: item.k }]).slice(-30);
+      saveMyFoods(mine).then(ok => { if (ok) { ui.calc.food = 'm:' + (mine.length - 1); rerender(); toast(item.n + ' saved to My foods'); } }); }
+  } else { const f = calcFoods().all.find(x => x.key === c.food); item = { n: f.name, u: f.u, q, p: f.p, k: f.k }; }
+  d.cf[ui.meal] = (d.cf[ui.meal] || []).concat([item]); ui.calc.qty = '';
+  if (c.food === 'new') ui.calc = { ...ui.calc, n: '', u: '', p: '', k: '' };
+  changed(); rerender(); toast('Added ' + r.t.p + ' g protein to ' + MEALS.find(m => m.id === ui.meal).label.toLowerCase());
+}
 async function doExport() {
   try { const data = await exportAll(); const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = 'fithit-export-' + today() + '.json'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -131,6 +153,10 @@ document.addEventListener('click', ev => {
   if (ds.veg) { d = draftFor(ui.selected); d.veg = Math.max(0, Math.min(15, (Number(d.veg) || 0) + Number(ds.veg))); changed(); rerender(); return; }
   if (ds.knee != null) { d = draftFor(ui.selected); const v = Number(ds.knee); d.knee = d.knee === v ? null : v; changed(); rerender(); return; }
   if (ds.meal) { ui.meal = ds.meal; rerender(); return; }
+  if (ds.mins) { const v = Number(ds.mins); ui.mins = ui.mins === v ? null : v; rememberMins(ui.mins); rerender(); return; }
+  if (ds.how) { ui.howOpen = ui.howOpen === ds.how ? null : ds.how; rerender(); return; }
+  if (ds.cxdel != null) { d = draftFor(ui.selected); d.cx.splice(Number(ds.cxdel), 1); changed(); rerender(); return; }
+  if (ds.cfdel != null) { d = draftFor(ui.selected); d.cf[ui.meal].splice(Number(ds.cfdel), 1); changed(); rerender(); return; }
   switch (ds.act) {
     case 'prev': ui.selected = keyOf(addDays(parseKey(ui.selected), -1)); ui.othersOpen = null; rerender(); break;
     case 'next': if (ui.selected < today()) { ui.selected = keyOf(addDays(parseKey(ui.selected), 1)); ui.othersOpen = null; rerender(); } break;
@@ -143,6 +169,11 @@ document.addEventListener('click', ev => {
       changed(); rerender(); break;
     case 'copymeal': { d = draftFor(ui.selected); const y = viewOf(keyOf(addDays(parseKey(ui.selected), -1)));
       if (y && y.meals && y.meals[ui.meal]) { d.meals[ui.meal] = clone(y.meals[ui.meal]); changed(); rerender(); toast('Copied yesterday\u2019s ' + MEALS.find(m => m.id === ui.meal).label.toLowerCase() + '. Adjust if needed, then save.'); } break; }
+    case 'cxadd': { d = draftFor(ui.selected); const f = ui.cx, n = cleanText(f.n, 40); if (!n) break;
+      d.cx.push({ n, kg: f.kg || null, reps: f.reps || null, min: f.min || null, kcal: f.kcal || null }); d.gym = true; ui.cx = {}; changed(); rerender(); toast(n + ' added. Tap Save day.'); break; }
+    case 'calcadd': addCalcFood(); break;
+    case 'myfooddel': { const i = Number(String(ui.calc.food).slice(2)), mine = (S.settings.myFoods || []).filter((_, j) => j !== i);
+      saveMyFoods(mine).then(ok => { if (ok) { ui.calc.food = 'b:whey'; rerender(); toast('Removed from My foods'); } }); break; }
     case 'save': save(ui.selected); break;
     case 'savetoday': save(today()); break;
     case 'opensettings': ui.settingsOpen = true; goTo('progress'); setTimeout(() => { const el = document.getElementById('settings'); if (el) el.scrollIntoView(); }, 0); break;
@@ -164,10 +195,16 @@ document.addEventListener('input', ev => {
   else if (ds.extrak) { d = draftFor(ui.selected); if (t.value === '' || Number(t.value) <= 0) delete d.extraK[ds.extrak]; else d.extraK[ds.extrak] = t.value; }
   else if (ds.body) { d = draftFor(today()); d.body[ds.body] = t.value === '' ? null : t.value; }
   else if (ds.set) { ui.sd = ui.sd || {}; ui.sd[ds.set] = t.value; return; }
+  else if (ds.cx) { ui.cx[ds.cx] = t.value; partial(); return; }
+  else if (ds.calc) { if (ds.calc === 'save') ui.calc.save = t.checked; else if (ds.calc !== 'food') ui.calc[ds.calc] = t.value; partial(); return; }
+  else if (ds.cfq != null) { d = draftFor(ui.selected); const it = d.cf[ui.meal][Number(ds.cfq)]; if (it) it.q = t.value; }
   else return;
   changed(); partial();
 });
-document.addEventListener('change', ev => { const t = ev.target; if (t.dataset && t.dataset.set) { ui.sd = ui.sd || {}; ui.sd[t.dataset.set] = t.value; } });
+document.addEventListener('change', ev => { const t = ev.target, ds = t.dataset || {};
+  if (ds.set) { ui.sd = ui.sd || {}; ui.sd[ds.set] = t.value; }
+  if (ds.calc === 'food') { ui.calc.food = t.value; ui.calc.qty = ''; rerender(); }
+  if (ds.calc === 'u' || ds.cfq != null) rerender(); });
 document.addEventListener('submit', ev => {
   if (ev.target.id !== 'signin') return; ev.preventDefault();
   const email = (document.getElementById('email').value || '').trim(); if (!email) return;
