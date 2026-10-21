@@ -224,7 +224,19 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 /* ---------------- start ---------------- */
 render();
 sb.auth.onAuthStateChange((_evt, session) => setUser(session ? session.user : null));
-sb.auth.getSession().then(r => {
+// Sign-in links carry a one-time code (?token_hash=...), the same way Parv's do, because both apps share one
+// Supabase project and email template. Verifying it here also makes links work in Gmail's in-app browser.
+async function start() {
+  const q = new URLSearchParams(window.location.search), th = q.get('token_hash');
+  if (th) {
+    const type = ['email', 'magiclink', 'signup'].includes(q.get('type')) ? q.get('type') : 'email';
+    const { error } = await sb.auth.verifyOtp({ token_hash: th, type });
+    history.replaceState(null, '', window.location.pathname);
+    if (error) { auth.error = /expired|invalid/i.test(error.message) ? 'That sign-in link has expired or was already used. Send a new one below.' : 'Couldn\u2019t sign in: ' + error.message; }
+  }
+  const r = await sb.auth.getSession();
   setUser(r.data && r.data.session ? r.data.session.user : null);
+  if (auth.error && !auth.user) render();
   if (window.location.hash && /access_token|error/.test(window.location.hash)) history.replaceState(null, '', window.location.pathname);
-});
+}
+start();
