@@ -1,9 +1,9 @@
 import './style.css';
-import { BY_ID, planFor, MEALS, DEFAULT_SETTINGS } from './catalogue.js';
-import { keyOf, parseKey, addDays, has, clone, ensure, normalize, isEmpty, isGymDay, exerciseCount, lastLoad, nextStep, cleanText } from './model.js';
+import { BY_ID, MEALS, DEFAULT_SETTINGS, TROUBLES } from './catalogue.js';
+import { keyOf, parseKey, addDays, has, clone, ensure, normalize, isEmpty, isGymDay, exerciseCount, lastLoad, suggestLoad, cleanText } from './model.js';
 import { sb, claim, loadAll, saveDay, loadSettings, saveSettings, exportAll, deleteAll, cache, draftStore, clearDevice } from './store.js';
-import { S, auth, ui, today, draftFor, isDirty, anyDirty, viewOf, persistDrafts, derive, rememberMins } from './state.js';
-import { header, switcher, logView, mealsSummary, mealTiles, proteinWeek, mealsView, saveBar, progressView, calendarView, navHtml, authView, guideView, calcResult, calcFoods } from './views.js';
+import { S, auth, ui, today, draftFor, isDirty, anyDirty, viewOf, persistDrafts, derive, rememberMins, rememberMood } from './state.js';
+import { header, switcher, logView, mealsSummary, mealTiles, proteinWeek, mealsView, saveBar, progressView, calendarView, navHtml, authView, guideView, calcResult, calcFoods, programmeFor, moodFor } from './views.js';
 
 /* ---------------- render ---------------- */
 function render() {
@@ -19,7 +19,7 @@ function render() {
   else h += calendarView(D);
   root.innerHTML = h; nav.innerHTML = navHtml();
 }
-const FOCUS_KEYS = ['m', 'inc', 'dec', 'meal', 'act', 'tab', 'day', 'kcal', 'extra', 'extrak', 'knee', 'veg', 'body', 'set', 'mins', 'how', 'cx', 'calc', 'cfq'];
+const FOCUS_KEYS = ['m', 'inc', 'dec', 'meal', 'act', 'tab', 'day', 'kcal', 'extra', 'extrak', 'knee', 'veg', 'body', 'set', 'mins', 'how', 'cx', 'calc', 'cfq', 'mood', 'tr', 'ab'];
 function rerender() {
   const a = document.activeElement; let sel = null;
   if (a && a.dataset) FOCUS_KEYS.some(k => { if (a.dataset[k] != null) { sel = '[data-' + k + '="' + a.dataset[k] + '"]' + (a.dataset.f ? '[data-f="' + a.dataset.f + '"]' : ''); return true; } return false; });
@@ -96,6 +96,20 @@ async function doSaveSettings() {
   if (r.error) { toast('Couldn\u2019t save settings: ' + r.error.message, true); return; }
   S.settings = next; ui.sd = null; cache.set(auth.user.id, S.entries, S.meta, S.settings); rerender(); toast('Settings saved');
 }
+/* ---------- About you: height, weight, gender, pain areas (v4) ---------- */
+function openAbout() { const st = S.settings; ui.ab = { heightCm: st.heightCm ?? '', weightKg: st.weightKg ?? '', sex: st.sex || '', troubles: [...(st.troubles || [])] }; }
+async function saveAbout() {
+  const a = ui.ab || {}, out = {};
+  const numIn = (v, lo, hi, label) => { if (v === '' || v == null) return { ok: true, v: null }; const n = Number(v);
+    if (!isFinite(n) || n < lo || n > hi) { toast('Check ' + label + ': it should be between ' + lo + ' and ' + hi + '.', true); return { ok: false }; } return { ok: true, v: Math.round(n * 10) / 10 }; };
+  const h = numIn(a.heightCm, 120, 230, 'height'); if (!h.ok) return; const w = numIn(a.weightKg, 30, 250, 'weight'); if (!w.ok) return;
+  out.heightCm = h.v; out.weightKg = w.v; out.sex = a.sex === 'f' || a.sex === 'm' ? a.sex : null;
+  out.troubles = TROUBLES.map(t => t.id).filter(id => (a.troubles || []).includes(id)); out.troublesAsked = true;
+  const next = { ...S.settings, ...out }, r = await saveSettings(auth.user.id, next);
+  if (r.error) { toast('Couldn\u2019t save: ' + r.error.message, true); return; }
+  S.settings = next; ui.ab = null; ui.aboutOpen = false; cache.set(auth.user.id, S.entries, S.meta, S.settings); rerender();
+  toast(out.troubles.length ? 'Saved. Routine adjusted for your ' + out.troubles.length + ' pain area' + (out.troubles.length > 1 ? 's' : '') : 'Saved');
+}
 /* ---------- My foods (saved with your settings, so they follow you to any device) ---------- */
 async function saveMyFoods(list) {
   const r = await saveSettings(auth.user.id, { ...S.settings, myFoods: list });
@@ -141,7 +155,7 @@ document.addEventListener('click', ev => {
     const ticked = m.g === 'cardio' ? has(d.cardio, m.id) : d.machines.includes(m.id);
     let focusSel = m.g === 'cardio' ? '[data-kcal="' + m.id + '"]' : '[data-load="' + m.id + '"]';
     if (ticked && m.load === true && !(d.loads[m.id] && d.loads[m.id].kg != null)) {
-      const step = nextStep(lastLoad(S.entries, m.id, ui.selected));
+      const step = suggestLoad(lastLoad(S.entries, m.id, ui.selected), moodFor(ui.selected));
       if (step) { d.loads[m.id] = { ...(d.loads[m.id] || {}), kg: step.kg, sug: true }; focusSel = '[data-load="' + m.id + '"][data-f="reps"]'; }
     }
     if (exerciseCount(d)) d.gym = true; changed(); rerender();
@@ -154,6 +168,8 @@ document.addEventListener('click', ev => {
   if (ds.knee != null) { d = draftFor(ui.selected); const v = Number(ds.knee); d.knee = d.knee === v ? null : v; changed(); rerender(); return; }
   if (ds.meal) { ui.meal = ds.meal; rerender(); return; }
   if (ds.mins) { const v = Number(ds.mins); ui.mins = ui.mins === v ? null : v; rememberMins(ui.mins); rerender(); return; }
+  if (ds.mood) { ui.mood = ui.mood === ds.mood ? null : ds.mood; rememberMood(ui.mood); ui.othersOpen = null; if (ui.mood && !S.settings.troublesAsked) openAbout(); rerender(); return; }
+  if (ds.tr) { if (!ui.ab) openAbout(); const tr = ui.ab.troubles, i = tr.indexOf(ds.tr); if (i > -1) tr.splice(i, 1); else tr.push(ds.tr); rerender(); return; }
   if (ds.how) { ui.howOpen = ui.howOpen === ds.how ? null : ds.how; rerender(); return; }
   if (ds.cxdel != null) { d = draftFor(ui.selected); d.cx.splice(Number(ds.cxdel), 1); changed(); rerender(); return; }
   if (ds.cfdel != null) { d = draftFor(ui.selected); d.cf[ui.meal].splice(Number(ds.cfdel), 1); changed(); rerender(); return; }
@@ -161,7 +177,10 @@ document.addEventListener('click', ev => {
     case 'prev': ui.selected = keyOf(addDays(parseKey(ui.selected), -1)); ui.othersOpen = null; rerender(); break;
     case 'next': if (ui.selected < today()) { ui.selected = keyOf(addDays(parseKey(ui.selected), 1)); ui.othersOpen = null; rerender(); } break;
     case 'gym': d = draftFor(ui.selected); if (isGymDay(d)) { d.gym = false; d.machines = []; d.cardio = {}; d.loads = {}; d.knee = null; } else d.gym = true; changed(); rerender(); break;
-    case 'others': { const dd = draftFor(ui.selected), ids = planFor(parseKey(ui.selected).getDay(), S.settings.restDow).items || [];
+    case 'about': if (ui.aboutOpen) { ui.aboutOpen = false; ui.ab = null; } else { openAbout(); ui.aboutOpen = true; } rerender(); break;
+    case 'trnone': if (!ui.ab) openAbout(); ui.ab.troubles = []; saveAbout(); break;
+    case 'saveabout': saveAbout(); break;
+    case 'others': { const dd = draftFor(ui.selected), ids = programmeFor(ui.selected).ids;
       const auto = !ids.length || dd.machines.some(x => !ids.includes(x)) || Object.keys(dd.cardio).some(x => !ids.includes(x));
       ui.othersOpen = !(ui.othersOpen !== null ? ui.othersOpen : auto); rerender(); break; }
     case 'clear': d = draftFor(ui.selected);
@@ -195,6 +214,7 @@ document.addEventListener('input', ev => {
   else if (ds.extrak) { d = draftFor(ui.selected); if (t.value === '' || Number(t.value) <= 0) delete d.extraK[ds.extrak]; else d.extraK[ds.extrak] = t.value; }
   else if (ds.body) { d = draftFor(today()); d.body[ds.body] = t.value === '' ? null : t.value; }
   else if (ds.set) { ui.sd = ui.sd || {}; ui.sd[ds.set] = t.value; return; }
+  else if (ds.ab) { if (!ui.ab) openAbout(); ui.ab[ds.ab] = t.value; return; }
   else if (ds.cx) { ui.cx[ds.cx] = t.value; partial(); return; }
   else if (ds.calc) { if (ds.calc === 'save') ui.calc.save = t.checked; else if (ds.calc !== 'food') ui.calc[ds.calc] = t.value; partial(); return; }
   else if (ds.cfq != null) { d = draftFor(ui.selected); const it = d.cf[ui.meal][Number(ds.cfq)]; if (it) it.q = t.value; }
@@ -203,6 +223,7 @@ document.addEventListener('input', ev => {
 });
 document.addEventListener('change', ev => { const t = ev.target, ds = t.dataset || {};
   if (ds.set) { ui.sd = ui.sd || {}; ui.sd[ds.set] = t.value; }
+  if (ds.ab) { if (!ui.ab) openAbout(); ui.ab[ds.ab] = t.value; }
   if (ds.calc === 'food') { ui.calc.food = t.value; ui.calc.qty = ''; rerender(); }
   if (ds.calc === 'u' || ds.cfq != null) rerender(); });
 document.addEventListener('submit', ev => {

@@ -9,9 +9,11 @@ export const S = { entries: {}, meta: {}, settings: { ...DEFAULT_SETTINGS }, dra
 export const auth = { user: null, ready: false, loaded: false, member: null, email: '', sent: false, error: '', busy: false };
 export const today = () => keyOf(new Date());
 export const ui = { tab: 'log', selected: today(), othersOpen: null, meal: defaultMeal(), settingsOpen: false, sd: null,
-  mins: readMins(), howOpen: null, cx: {}, calc: { food: 'b:whey', qty: '', n: '', u: '', p: '', k: '', save: true } };
+  mins: readMins(), mood: readMood(), aboutOpen: false, ab: null, howOpen: null, cx: {}, calc: { food: 'b:whey', qty: '', n: '', u: '', p: '', k: '', save: true } };
 function readMins() { try { const v = Number(localStorage.getItem('fithit-mins')); return v >= 20 && v <= 240 ? v : null; } catch (e) { return null; } }
 export function rememberMins(v) { try { if (v) localStorage.setItem('fithit-mins', String(v)); else localStorage.removeItem('fithit-mins'); } catch (e) { /* storage blocked */ } }
+function readMood() { try { const v = JSON.parse(localStorage.getItem('fithit-mood') || 'null'); return v && v.d === keyOf(new Date()) ? v.m : null; } catch { return null; } }
+export function rememberMood(m) { try { if (m) localStorage.setItem('fithit-mood', JSON.stringify({ d: today(), m })); else localStorage.removeItem('fithit-mood'); } catch { /* storage blocked */ } }
 function defaultMeal() { const h = new Date().getHours(); return h < 11 ? 'b' : h < 16 ? 'l' : h < 19 ? 's' : 'd'; }
 
 export function draftFor(k) { if (!S.drafts[k]) S.drafts[k] = ensure(clone(S.entries[k] || blank())); return S.drafts[k]; }

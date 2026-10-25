@@ -1,6 +1,6 @@
 // Screens. Each function returns HTML for one part of the app; no saving or event handling here.
-import { GROUPS, GROUP_LABEL, MACHINES, BY_ID, CUES, PAIN_RULE, planFor, DAYNAMES, MUSCLES, DOW, MEALS, FOODS, FOOD_BY, RANK, RANK_WHY, GUIDE, demoLinks, CIRCUIT, PROGRESSION } from './catalogue.js';
-import { keyOf, parseKey, addDays, mondayOf, daysBetween, has, isGymDay, kcalBurned, exerciseCount, mealTotals, dayTotals, servings, lastLoad, nextStep, checkins, weeklyPace, latestWhr, strengthSummary, pad, buildPlan, clock, foodMeasure, amountTotals } from './model.js';
+import { GROUPS, GROUP_LABEL, MACHINES, BY_ID, CUES, PAIN_RULE, planFor, DAYNAMES, MUSCLES, DOW, MEALS, FOODS, FOOD_BY, RANK, RANK_WHY, GUIDE, demoLinks, CIRCUIT, PROGRESSION, MOODS, MOOD_BY, TROUBLES, TROUBLE_LABEL } from './catalogue.js';
+import { keyOf, parseKey, addDays, mondayOf, daysBetween, has, isGymDay, kcalBurned, exerciseCount, mealTotals, dayTotals, servings, lastLoad, checkins, weeklyPace, latestWhr, strengthSummary, pad, buildPlan, clock, foodMeasure, amountTotals, buildRoutine, bmiOf, whrLimitFor, suggestLoad, estimateKcal } from './model.js';
 import { S, auth, ui, today, draftFor, isDirty, viewOf, proteinGoal, mealTarget } from './state.js';
 
 export const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -58,7 +58,7 @@ function loadRow(m, d) {
     return '<div class="ld"><label class="lf"><span class="sr">Reps for ' + esc(m.name) + '</span><input class="inp v sm num" type="number" inputmode="numeric" min="1" max="200" placeholder="0" data-load="' + m.id + '" data-f="reps" value="' + val(L.reps) + '"></label><span class="unit">reps</span>' +
       '<span class="cue grow">' + (last && last.reps ? 'Last: ' + last.reps + ' reps (' + shortDate(last.key) + ')' : 'First time logging') + '</span></div>';
   }
-  const step = nextStep(last);
+  const step = suggestLoad(last, moodFor(ui.selected));
   return '<div class="ld"><label class="lf"><span class="sr">Weight in kg for ' + esc(m.name) + '</span><input class="inp v sm num" type="number" inputmode="decimal" step="0.5" min="0" max="400" placeholder="kg" data-load="' + m.id + '" data-f="kg" value="' + val(L.kg) + '"></label><span class="unit">kg \u00d7</span>' +
     '<label class="lf"><span class="sr">Reps for ' + esc(m.name) + '</span><input class="inp v sm num" type="number" inputmode="numeric" min="1" max="60" placeholder="reps" data-load="' + m.id + '" data-f="reps" value="' + val(L.reps) + '"></label><span class="unit">reps</span></div>' +
     '<div class="ldn cue">' + (last && last.kg != null ? 'Last: ' + fmt(last.kg, 1) + ' kg \u00d7 ' + (last.reps || '?') + ' (' + shortDate(last.key) + ')' + (step ? ' \u00b7 <span class="vt">Today: ' + fmt(step.kg, 1) + ' kg</span>. ' + step.reason + '.' : '') : 'First time logging: pick a weight you can lift 12 times with good form.') + '</div>';
@@ -84,23 +84,88 @@ export function guidePanel(m) {
     '<div class="gp-l"><a href="' + L.video + '" target="_blank" rel="noopener noreferrer">Watch a demo ' + svg(I.ext, 14) + '</a><a href="' + L.pics + '" target="_blank" rel="noopener noreferrer">See pictures ' + svg(I.ext, 14) + '</a></div>' +
     '<p class="fine" style="margin-top:8px">Links open a search on YouTube or Google Images. Pick a video from a qualified trainer and follow your own cue above if they differ.</p></div>';
 }
-/* ---------- (a, b) plan the session to the time you have ---------- */
+/* ---------- v4: today's routine from mood, pain areas and body ---------- */
+/** Mood applies to today only, so past days keep their own programme. */
+export const moodFor = k => (k === today() ? ui.mood : null);
+const lastWeigh = () => { const w = [...checkins(S.entries)].reverse().find(c => c.weight != null); return w || null; };
+export function bodyNow() {
+  const st = S.settings, lw = lastWeigh(), kg = st.weightKg || (lw ? lw.weight : null);
+  return { kg, fromWeigh: !st.weightKg && lw ? lw.key : null, bmi: bmiOf(st.heightCm, kg) };
+}
+/** Today's programme: the routine if a mood is picked (and pain areas answered), else the weekday session. */
+export function programmeFor(k) {
+  const p = planFor(parseKey(k).getDay(), S.settings.restDow), mood = moodFor(k);
+  const routine = mood && S.settings.troublesAsked ? buildRoutine({ mood, troubles: S.settings.troubles || [], session: p, bmi: bodyNow().bmi, seed: daysBetween('2026-01-01', k) }) : null;
+  return { p, mood, routine, ids: routine ? routine.items : (p.items || []) };
+}
 const MIN_CHOICES = [30, 45, 60, 75, 90, 120], MIN_LABEL = { 30: '30 min', 45: '45 min', 60: '1 hr', 75: '1\u00bc hr', 90: '1\u00bd hr', 120: '2 hr' };
-function planCard(p, plan) {
-  let h = '<section class="pad"><div class="card plan"><div class="kick v">' + svg(I.clock, 14) + ' Plan your time</div><p class="cue" style="margin-top:6px">How long can you stay today? FitHit fits the session in and puts it in the right order.</p>' +
-    '<div class="chips" role="radiogroup" aria-label="Minutes at the gym today">' + MIN_CHOICES.map(n => '<button role="radio" aria-checked="' + (ui.mins === n) + '" data-mins="' + n + '">' + MIN_LABEL[n] + '</button>').join('') + '</div>';
-  if (!plan) return h + '</div></section>';
+const SEX_LABEL = { f: 'Female', m: 'Male' };
+function aboutForm(first) {
+  const a = ui.ab || {}, lw = lastWeigh(), tr = a.troubles || [];
+  const n = (k, label, unit, ph, min, max, step) => '<label class="bf"><span>' + label + '</span><span class="bfi"><input class="inp v sm num" type="number" inputmode="decimal" min="' + min + '" max="' + max + '" step="' + step + '" placeholder="' + ph + '" data-ab="' + k + '" value="' + val(a[k]) + '"><span class="unit">' + unit + '</span></span></label>';
+  return '<div class="about">' + (first ? '<div class="kick v">Before FitHit builds it</div><p class="ab-q">Any pain or trouble today?</p><p class="cue">Tap every area that hurts or is healing. FitHit swaps or skips the moves that load it and tells you why.</p>'
+      : '<div class="kick v">About you</div><p class="cue" style="margin-top:4px">Pain or trouble areas</p>') +
+    '<div class="tchips" role="group" aria-label="Pain or trouble areas">' + TROUBLES.map(t => '<button aria-pressed="' + tr.includes(t.id) + '" data-tr="' + t.id + '">' + esc(t.label) + '</button>').join('') + '</div>' +
+    '<div class="bgrid" style="margin-top:14px">' + n('heightCm', 'Height', 'cm', '160', 120, 230, 1) + n('weightKg', 'Weight', 'kg', lw ? fmt(lw.weight, 1) : '70', 30, 250, 0.1) + '</div>' +
+    '<label class="bf" style="margin-top:12px"><span>Gender</span><select class="inp v sel" data-ab="sex"><option value="">Prefer not to say</option><option value="f"' + (a.sex === 'f' ? ' selected' : '') + '>Female</option><option value="m"' + (a.sex === 'm' ? ' selected' : '') + '>Male</option></select></label>' +
+    '<p class="fine">Height and weight give your BMI, which steers the cardio choice, and your calorie estimate. Gender sets your waist-to-hip health line (0.85 women, 0.90 men).' + (lw ? ' Leave weight blank to use your latest weigh-in (' + fmt(lw.weight, 1) + ' kg, ' + shortDate(lw.key) + ').' : '') + '</p>' +
+    '<div class="ab-b">' + (first ? '<button class="clr" data-act="trnone">No trouble</button>' : '<button class="clr" data-act="about">Cancel</button>') + '<button class="save" data-act="saveabout">' + (first ? 'Build my routine' : 'Save') + '</button></div></div>';
+}
+function aboutSummary() {
+  const st = S.settings, b = bodyNow(), tr = st.troubles || [], parts = [];
+  if (st.heightCm) parts.push(st.heightCm + ' cm'); if (b.kg) parts.push(fmt(b.kg, 1) + ' kg' + (b.fromWeigh ? ' (weigh-in ' + shortDate(b.fromWeigh) + ')' : ''));
+  if (b.bmi) parts.push('BMI ' + fmt(b.bmi.v, 1)); if (st.sex) parts.push(SEX_LABEL[st.sex]);
+  return '<div class="absum"><span class="grow"><span class="cue">' + (parts.length ? esc(parts.join(' \u00b7 ')) : 'Add height and weight for your BMI and calorie estimate.') + '</span>' +
+    '<span class="cue">' + (tr.length ? 'Pain areas: <b class="vt">' + esc(tr.map(t => TROUBLE_LABEL[t]).join(', ')) + '</b>' : 'No pain areas') + '</span></span><button class="lnk" data-act="about">Change</button></div>';
+}
+function bmiLine(bmi) {
+  if (!bmi) return '';
+  const words = { under: 'under 18.5 (underweight)', normal: 'in the healthy range', over: 'overweight on the Indian guideline (23\u201324.9)', obese: bmi.v >= 30 ? 'in the obesity range (WHO and Indian guidelines)' : 'in the obesity range on the Indian guideline (25+); WHO calls it overweight' };
+  return '<p class="fine">BMI ' + fmt(bmi.v, 1) + ': ' + words[bmi.band] + '. BMI doesn\u2019t see muscle, so your waist and InBody numbers matter more.</p>';
+}
+function changesBlock(r) {
+  if (!r.changes.length && !Object.keys(r.cues).length && !r.notes.length) return '';
+  const nm = id => esc(BY_ID[id].name);
+  let h = '<div class="adj"><div class="kick">Adjusted for you</div><ul>';
+  r.changes.forEach(c => { const area = esc(TROUBLE_LABEL[c.area].toLowerCase());
+    h += '<li>' + (c.to && !c.dup ? '<b>' + nm(c.from) + '</b> \u2192 <b class="vt">' + nm(c.to) + '</b>. Skipped for your ' + area + ': ' + esc(c.why) + '.'
+      : '<b>Skip ' + nm(c.from) + '</b> for your ' + area + ': ' + esc(c.why) + '.' + (c.to ? ' ' + nm(c.to) + ' is already in your plan.' : '')) + '</li>'; });
+  const modded = Object.keys(r.cues).filter(id => !r.changes.some(c => c.to === id));
+  if (modded.length) h += '<li>' + plural(modded.length, 'move') + ' changed to protect ' + esc((S.settings.troubles || []).map(t => TROUBLE_LABEL[t].toLowerCase()).join(' and ')) + ': see the cue under each one.</li>';
+  r.notes.forEach(x => { h += '<li>' + esc(x) + '</li>'; });
+  return h + '</ul><p class="fine">If anything hurts sharply, stop that move. For pain that keeps coming back, see a physiotherapist or doctor.</p></div>';
+}
+/* ---------- (a, b) plan the session to the time you have ---------- */
+function planCard(P, plan) {
+  const p = P.p, isToday = ui.selected === today(), mood = P.mood, M = mood ? MOOD_BY[mood] : null, r = P.routine, src = r ? r.session : p;
+  let h = '<section class="pad"><div class="card plan"><div class="kick v">' + svg(I.clock, 14) + (isToday ? ' Plan today' : ' Plan your time') + '</div>';
+  if (isToday) {
+    h += '<p class="cue" style="margin-top:6px">How do you feel today?</p><div class="chips" role="radiogroup" aria-label="How you feel today">' + MOODS.map(m => '<button role="radio" aria-checked="' + (mood === m.id) + '" data-mood="' + m.id + '">' + esc(m.label) + '</button>').join('') + '</div>';
+    if (M) h += '<p class="cue" style="margin-top:8px">' + esc(M.note) + (p.rest && mood === 'heavy' ? ' It\u2019s your rest day, so Light or Only cardio is the kinder choice.' : '') + '</p>';
+  }
+  h += '<p class="cue" style="margin-top:14px">How long can you stay?</p><div class="chips" role="radiogroup" aria-label="Minutes at the gym today">' + MIN_CHOICES.map(n => '<button role="radio" aria-checked="' + (ui.mins === n) + '" data-mins="' + n + '">' + MIN_LABEL[n] + '</button>').join('') + '</div>';
+  if (mood && !S.settings.troublesAsked) return h + aboutForm(true) + '</div></section>';
+  if (mood) h += ui.aboutOpen ? aboutForm(false) : aboutSummary();
+  if (r) h += changesBlock(r) + bmiLine(bodyNow().bmi);
+  if (!plan) return h + (mood && !ui.mins ? '' : '') + '</div></section>';
+  if (mood && !ui.mins) h += '<p class="msg">Planned for 1 hour. Pick your time above to change it.</p>';
   const row = (t, n, title, sub, cls) => '<li class="tl' + (cls ? ' ' + cls : '') + '"><span class="tl-t num">' + clock(t) + '</span><span class="grow"><b>' + (n ? '<span class="tl-n num">' + n + '</span>' : '') + esc(title) + '</b><span class="cue">' + sub + '</span></span></li>';
-  h += '<ol class="tlist">' + row(0, '', 'Warm-up \u00b7 ' + plan.warm + ' min', 'Easy pace on a bike or the cross trainer. Gets blood to the muscles and loosens the knee.');
+  h += '<ol class="tlist">' + row(0, '', 'Warm-up \u00b7 ' + plan.warm + ' min', 'Easy pace on a bike or the cross trainer. Gets blood to the muscles and loosens the joints.');
   let lastRank = 0;
-  const cardioRow = () => plan.cardio ? row(plan.cardio.start, '', 'Cardio \u00b7 ' + plan.cardio.dur + ' min', esc(plan.cardio.ids.map(id => BY_ID[id].name).join(' or ')) + (p.cardioFocus ? '. ' + esc((p.cues && p.cues[plan.cardio.ids[0]]) || '') : '. After weights, so you lift with full energy.')) : '';
-  if (p.cardioFocus) h += cardioRow();
-  plan.steps.forEach((s, i) => { const m = BY_ID[s.id], why = s.rank !== lastRank ? ' \u00b7 ' + RANK_WHY[s.rank] : ''; lastRank = s.rank;
-    h += row(s.start, pad(i + 1), m.name + ' \u00b7 ' + s.dur + ' min', (m.g === 'core' ? '2\u20133 rounds' : PROGRESSION.sets + ' sets \u00d7 ' + PROGRESSION.repBottom + '\u2013' + PROGRESSION.repTop + ', 60 s rest') + esc(why)); });
-  if (!p.cardioFocus) h += cardioRow();
+  const cardioSub = () => esc(plan.cardio.ids.map(id => BY_ID[id].name).join(' or ')) + (mood === 'cardio' ? '. Split the time between them if you like. Moderate pace: you can talk, but not sing.' : mood === 'light' ? '. Easy pace: you can talk in full sentences.' : src.cardioFocus ? '. ' + esc((p.cues && p.cues[plan.cardio.ids[0]]) || '') : '. After weights, so you lift with full energy.');
+  const cardioRow = () => plan.cardio ? row(plan.cardio.start, '', 'Cardio \u00b7 ' + plan.cardio.dur + ' min', cardioSub()) : '';
+  if (src.cardioFocus) h += cardioRow();
+  plan.steps.forEach((s, i) => { const m = BY_ID[s.id], why = s.rank !== lastRank && !src.cardioFocus ? ' \u00b7 ' + RANK_WHY[s.rank] : ''; lastRank = s.rank;
+    const sets = m.g === 'core' ? '2\u20133 rounds' : M ? M.sets + ' sets \u00d7 ' + M.reps + ', ' + M.rest + ' rest' : PROGRESSION.sets + ' sets \u00d7 ' + PROGRESSION.repBottom + '\u2013' + PROGRESSION.repTop + ', 60 s rest';
+    const sug = m.load === true ? suggestLoad(lastLoad(S.entries, s.id, ui.selected), mood) : null;
+    const pain = r && r.cues[s.id] ? ' \u00b7 <span class="vt">' + esc(r.cues[s.id]) + '</span>' : '';
+    h += row(s.start, pad(i + 1), m.name + ' \u00b7 ' + s.dur + ' min', esc(sets) + (sug ? ' \u00b7 ' + (mood === 'light' ? 'light: ' : 'today: ') + fmt(sug.kg, 1) + ' kg' : '') + pain + esc(why)); });
+  if (!src.cardioFocus) h += cardioRow();
   h += row(plan.coolStart, '', 'Stretch \u00b7 ' + plan.cool + ' min', 'Chest, upper back, calves and hamstrings, 20\u201330 s each. See Guide.') + '</ol>';
   if (plan.skipped.length) h += '<p class="msg">Left out to fit ' + plan.mins + ' min: ' + esc(plan.skipped.map(id => BY_ID[id].name).join(', ')) + '. Do them first next time, or on a longer day.</p>';
   if (plan.spare >= 10) h += '<p class="msg">' + plan.spare + ' min spare. Add the <button class="lnk" data-tab="guide">endurance circuit</button> (about 17 min) or stretch longer.</p>';
+  if (mood) { const b = bodyNow(), kc = estimateKcal(plan, mood, b.kg);
+    h += kc ? '<p class="msg">About <b class="vt">' + fmt(kc) + ' kcal</b> for this plan at ' + fmt(b.kg, 1) + ' kg. An estimate from standard activity values (2024 Compendium of Physical Activities); your machine screens may differ.</p>' : '<p class="msg">Add your weight under About you to see a calorie estimate.</p>'; }
   return h + '</div></section>';
 }
 function customExercises(d) {
@@ -123,28 +188,29 @@ function kneeBlock(d) {
     (d.knee > 0 ? '<p class="cue" style="margin-top:10px">' + PAIN_RULE + (d.knee === 2 ? ' Two stops in two weeks is a good reason to see a physiotherapist.' : '') + '</p>' : '') + '</div>';
 }
 export function logView(D) {
-  const d = draftFor(ui.selected), dow = parseKey(ui.selected).getDay(), p = planFor(dow, S.settings.restDow), ids = p.items || [];
-  const plan = buildPlan(p, ui.mins);
+  const d = draftFor(ui.selected), dow = parseKey(ui.selected).getDay(), P = programmeFor(ui.selected), p = P.p, ids = P.ids, r = P.routine;
+  const src = r ? r.session : p, plan = buildPlan(src, ui.mins || (r ? 60 : null));
   // (b) always in a sensible order: big moves, smaller, arms, core, then cardio. With a time plan, planned items first.
   const rank = id => BY_ID[id].g === 'cardio' ? 9 : (RANK[id] || 5);
   let ordered = ids.map((id, i) => ({ id, i })).sort((a, b) => rank(a.id) - rank(b.id) || a.i - b.i).map(x => x.id);
-  if (plan) { const lifts = plan.steps.map(s => s.id), cardio = plan.cardio ? plan.cardio.ids : [], first = p.cardioFocus ? cardio.concat(lifts) : lifts.concat(cardio); ordered = first.concat(ordered.filter(id => !first.includes(id))); }
-  else if (p.cardioFocus) ordered = ordered.filter(id => BY_ID[id].g === 'cardio').concat(ordered.filter(id => BY_ID[id].g !== 'cardio'));
-  const items = ordered.map((id, i) => ({ m: BY_ID[id], cue: (plan && plan.skipped.includes(id) ? 'Left out today to fit your time. ' : '') + ((p.cues && p.cues[id]) || CUES[id] || ''), num: pad(i + 1) }));
+  if (plan) { const lifts = plan.steps.map(s => s.id), cardio = plan.cardio ? plan.cardio.ids : [], first = src.cardioFocus ? cardio.concat(lifts) : lifts.concat(cardio); ordered = first.concat(ordered.filter(id => !first.includes(id))); }
+  else if (src.cardioFocus) ordered = ordered.filter(id => BY_ID[id].g === 'cardio').concat(ordered.filter(id => BY_ID[id].g !== 'cardio'));
+  const items = ordered.map((id, i) => ({ m: BY_ID[id], cue: (plan && plan.skipped.includes(id) ? 'Left out today to fit your time. ' : '') + ((r && r.cues[id]) || (!r && p.cues && p.cues[id]) || CUES[id] || ''), num: pad(i + 1) }));
   const isOn = m => m.g === 'cardio' ? has(d.cardio, m.id) : d.machines.includes(m.id);
   const done = items.filter(x => isOn(x.m)).length;
   const extra = d.machines.some(id => !ids.includes(id)) || Object.keys(d.cardio).some(id => !ids.includes(id));
   const open = ui.othersOpen !== null ? ui.othersOpen : (!ids.length || extra);
   const gymOn = isGymDay(d);
-  let h = '<section class="card sess"><div class="kick">' + DAYNAMES[dow] + (p.rest ? ' \u00b7 Recovery' : ' \u00b7 Session') + '</div><h1>' + esc(p.title) + '</h1>';
-  if (p.rx) h += '<div class="rx">' + p.rx.map(r => '<div><b class="num">' + r.value + '</b><span>' + r.label + '</span></div>').join('') + '</div>';
-  h += '<p class="note">' + esc(p.note) + '</p>';
+  let h = '<section class="card sess"><div class="kick">' + DAYNAMES[dow] + (r ? ' \u00b7 Today\u2019s routine' : p.rest ? ' \u00b7 Recovery' : ' \u00b7 Session') + '</div><h1>' + esc(r ? MOOD_BY[r.mood].label + (r.mood !== 'cardio' && !p.rest && p.focus !== 'full' ? ': ' + p.title : '') : p.title) + '</h1>';
+  if (r && r.mood !== 'cardio') { const M = MOOD_BY[r.mood]; h += '<div class="rx"><div><b class="num">' + M.sets + '</b><span>Sets</span></div><div><b class="num">' + M.reps + '</b><span>Reps</span></div><div><b class="num">' + M.rest.replace(' s', '') + '</b><span>Rest (s)</span></div><div><b class="num">' + r.session.cardio + '</b><span>Cardio min</span></div></div>'; }
+  else if (p.rx && !r) h += '<div class="rx">' + p.rx.map(r => '<div><b class="num">' + r.value + '</b><span>' + r.label + '</span></div>').join('') + '</div>';
+  h += '<p class="note">' + esc(r ? 'Built from how you feel, your pain areas and your body. Your usual ' + p.title.toLowerCase() + ' plan returns when you clear the mood.' : p.note) + '</p>';
   if (ids.length) h += '<div class="prog"><div class="prog-h"><span class="kick">Session progress</span><span class="big num" aria-label="' + done + ' of ' + items.length + ' done"><span class="v">' + done + '</span>/' + items.length + '</span></div><div class="segs" aria-hidden="true">' +
     items.map(x => '<span' + (isOn(x.m) ? ' class="on"' : '') + '></span>').join('') + '</div></div>';
   h += '</section><div class="pad"><button class="gym' + (gymOn ? ' on' : '') + '" data-act="gym" aria-pressed="' + gymOn + '"><span style="color:var(--volt);display:grid">' + svg(I.dumbbell, 22) + '</span>' +
     '<span class="grow"><span class="gym-t">Went to the gym</span><span class="sub">' + (gymOn ? 'Counts toward your week' : 'Tick even if you only did a few machines') + '</span></span>' + (gymOn ? CHECK : BOX) + '</button>' + (gymOn ? kneeBlock(d) : '') + '</div>';
-  if (!p.rest && ids.length) h += planCard(p, plan);
-  if (ids.length) h += '<section class="sec"><div class="sec-h"><h2>Programme</h2><span class="cap">Tap to tick off, then log the weight</span></div><p class="cue" style="margin:-6px 0 14px">In this order: big moves \u2192 smaller muscles \u2192 arms \u2192 core \u2192 cardio. Tap <b>How to do it</b> on any exercise.</p><div class="list">' + items.map(x => itemRow(x.m, x.cue, x.num, d)).join('') + '</div></section>';
+  if ((!p.rest && ids.length) || ui.selected === D.TODAY) h += planCard(P, plan);
+  if (ids.length) h += '<section class="sec"><div class="sec-h"><h2>Programme</h2><span class="cap">Tap to tick off, then log the weight</span></div><p class="cue" style="margin:-6px 0 14px">' + (src.cardioFocus ? 'Cardio first, then core on the mat.' : 'In this order: big moves \u2192 smaller muscles \u2192 arms \u2192 core \u2192 cardio.') + ' Tap <b>How to do it</b> on any exercise.</p><div class="list">' + items.map(x => itemRow(x.m, x.cue, x.num, d)).join('') + '</div></section>';
   const groups = GROUPS.map(g => ({ g, items: MACHINES.filter(m => m.g === g.id && !ids.includes(m.id)) })).filter(x => x.items.length);
   const total = groups.reduce((a, x) => a + x.items.length, 0);
   h += '<section class="pad" style="margin-top:32px"><button class="disc" data-act="others" aria-expanded="' + !!open + '"><span class="t">' + (ids.length ? 'Other exercises' : 'All exercises') + '</span><span class="cap">' + total + ' available</span><span class="chev">' + svg(I.down, 18) + '</span></button>';
@@ -281,8 +347,8 @@ function bodyCard(D) {
   let retest = 'Set your last InBody date in Settings to get a retest reminder.';
   if (st.lastInbody) { const due = keyOf(addDays(parseKey(st.lastInbody), st.retestWeeks * 7)), left = daysBetween(D.TODAY, due);
     retest = left < 0 ? 'InBody retest overdue by ' + plural(-left, 'day') + '.' : 'Next InBody retest: ' + shortDate(due) + ' (' + plural(left, 'day') + '). Same time of day, before eating.'; }
-  const whr = latestWhr(list);
-  h += '<p class="msg">' + vfLine + (lastWaist ? ' \u00b7 Waist ' + fmt(lastWaist.waist, 1) + ' cm' : '') + '</p>' + (whr ? '<p class="msg' + (whr.whr > st.whrLimit ? ' err' : '') + '">Waist-to-hip ratio ' + whr.whr.toFixed(2) + (whr.whr > st.whrLimit ? ', above the ' + st.whrLimit + ' health-risk line for women. Waist coming down is the best sign visceral fat is dropping.' : ', at or under ' + st.whrLimit + '. Well done.') + '</p>' : '<p class="msg">Add waist and hip to track your waist-to-hip ratio (health-risk line: ' + st.whrLimit + ').</p>') + '<p class="msg' + (retest.includes('overdue') ? ' err' : '') + '">' + retest + '</p>';
+  const whr = latestWhr(list), whrL = whrLimitFor(st.sex), whrWho = st.sex === 'm' ? 'men' : 'women';
+  h += '<p class="msg">' + vfLine + (lastWaist ? ' \u00b7 Waist ' + fmt(lastWaist.waist, 1) + ' cm' : '') + '</p>' + (whr ? '<p class="msg' + (whr.whr >= whrL ? ' err' : '') + '">Waist-to-hip ratio ' + whr.whr.toFixed(2) + (whr.whr >= whrL ? ', at or above the ' + fmt(whrL, 2) + ' health-risk line for ' + whrWho + ' (WHO). Waist coming down is the best sign visceral fat is dropping.' : ', under ' + fmt(whrL, 2) + '. Well done.') + '</p>' : '<p class="msg">Add waist and hip to track your waist-to-hip ratio (health-risk line for ' + whrWho + ': ' + fmt(whrL, 2) + ').</p>') + '<p class="msg' + (retest.includes('overdue') ? ' err' : '') + '">' + retest + '</p>';
   const f = (k, label, unit, step, min, max) => '<label class="bf"><span>' + label + '</span><span class="bfi"><input class="inp v sm num" type="number" inputmode="decimal" step="' + step + '" min="' + min + '" max="' + max + '" placeholder="\u2013" data-body="' + k + '" value="' + val(b[k]) + '"><span class="unit">' + unit + '</span></span></label>';
   h += '<div class="kick" style="margin-top:20px">Today\u2019s check-in</div><div class="bgrid">' + f('weight', 'Weight', 'kg', '0.1', 30, 250) + f('waist', 'Waist', 'cm', '0.5', 40, 200) + f('hip', 'Hip', 'cm', '0.5', 50, 200) + f('bf', 'Body fat', '%', '0.1', 3, 70) + f('vf', 'Visceral fat', 'level', '1', 1, 30) + '</div>' +
     '<p class="fine">Measure waist at the navel and hip at the widest point, relaxed. Body fat and visceral fat come from your InBody report; leave them blank on normal weigh-ins.</p>' +

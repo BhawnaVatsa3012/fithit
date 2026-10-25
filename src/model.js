@@ -1,5 +1,5 @@
 // Pure data logic: no DOM, no network. Covered by tests/model.test.js.
-import { MEALS, FOOD_BY, BY_ID, PROGRESSION, RANK, MINUTES } from './catalogue.js';
+import { MEALS, FOOD_BY, BY_ID, PROGRESSION, RANK, MINUTES, MOOD_BY, TROUBLE_RULES, CARDIO_ORDER, FREE_ADD, FULL_BODY, CARDIO_CORE, BMI_BANDS, WHR_LIMIT, MET } from './catalogue.js';
 
 export const pad = n => String(n).padStart(2, '0');
 export const keyOf = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -48,7 +48,7 @@ export function buildPlan(session, mins) {
   mins = Number(mins); if (!session || session.rest || !mins || mins < 20) return null;
   const ids = session.items || [], cardioIds = ids.filter(id => BY_ID[id] && BY_ID[id].g === 'cardio');
   const lifts = ids.filter(id => BY_ID[id] && BY_ID[id].g !== 'cardio' && !BY_ID[id].paused)
-    .map((id, i) => ({ id, i, rank: RANK[id] || 5, dur: BY_ID[id].g === 'core' ? MINUTES.core : MINUTES.lift }));
+    .map((id, i) => ({ id, i, rank: RANK[id] || 5, dur: BY_ID[id].g === 'core' ? (session.coreMins || MINUTES.core) : (session.liftMins || MINUTES.lift) }));
   const warm = mins >= 45 ? 10 : 5, cool = mins >= 45 ? 5 : 3, rem = mins - warm - cool;
   const need = lifts.reduce((a, x) => a + x.dur, 0), byRank = [...lifts].sort((a, b) => a.rank - b.rank || a.i - b.i);
   const pick = budget => { const out = []; byRank.forEach(x => { if (x.dur <= budget) { out.push(x); budget -= x.dur; } }); return out; };
@@ -180,4 +180,93 @@ export function strengthSummary(entries, drop = 0.1) {
   return Object.keys(byM).map(id => { const list = byM[id], last = list[list.length - 1], best = list.reduce((a, b) => b.kg > a.kg ? b : a, list[0]);
     return { id, first: list[0], best, last, count: list.length, dropped: best.kg > 0 && last.kg <= best.kg * (1 - drop) && last.key !== best.key }; })
     .sort((a, b) => a.last.key < b.last.key ? 1 : -1);
+}
+
+/* ---------- v4: today's routine from mood, pain areas and body ---------- */
+/** BMI from height (cm) and weight (kg), with the band FitHit uses (Indian consensus lines) and the WHO band. */
+export function bmiOf(heightCm, weightKg) {
+  const h = Number(heightCm) / 100, w = Number(weightKg);
+  if (!(h >= 1.2 && h <= 2.3) || !(w >= 30 && w <= 250)) return null;
+  const v = Math.round(w / (h * h) * 10) / 10, B = BMI_BANDS;
+  const band = v < B.under ? 'under' : v < B.over ? 'normal' : v < B.obese ? 'over' : 'obese';
+  const who = v < B.under ? 'under' : v < B.whoOver ? 'normal' : v < B.whoObese ? 'over' : 'obese';
+  return { v, band, who };
+}
+/** Waist-to-hip risk line for the person's sex (women 0.85, men 0.90; women's line if not set). */
+export const whrLimitFor = sex => sex === 'm' ? WHR_LIMIT.m : WHR_LIMIT.f;
+
+/** Apply pain areas to one exercise: { id } kept (maybe with cues), swapped { id, from, area, why }, or dropped { id: null }. */
+export function adjustFor(id, troubles) {
+  const skipBy = troubles.find(t => TROUBLE_RULES[t] && TROUBLE_RULES[t].skip[id]);
+  if (skipBy) {
+    const [swap, why] = TROUBLE_RULES[skipBy].skip[id];
+    const ok = swap && !troubles.some(t => TROUBLE_RULES[t] && TROUBLE_RULES[t].skip[swap]);
+    return { id: ok ? swap : null, from: id, area: skipBy, why, cues: ok ? modsFor(swap, troubles) : [] };
+  }
+  return { id, cues: modsFor(id, troubles) };
+}
+const modsFor = (id, troubles) => troubles.map(t => TROUBLE_RULES[t] && TROUBLE_RULES[t].mod[id]).filter(Boolean);
+
+/**
+ * Today's routine. mood: 'heavy' | 'light' | 'cardio'. troubles: area ids. session: today's planned session.
+ * bmi: from bmiOf (optional). seed: a number that changes daily, to rotate the free-weight picks.
+ * Returns { mood, session (feed it to buildPlan), items, cues: {id: text}, changes: [{from, to, area, why}], notes: [] }.
+ */
+export function buildRoutine({ mood, troubles = [], session, bmi = null, seed = 0 }) {
+  const M = MOOD_BY[mood]; if (!M) return null;
+  troubles = troubles.filter(t => TROUBLE_RULES[t]);
+  const cues = {}, changes = [], notes = [], out = [];
+  const add = (id, track) => {
+    if (!BY_ID[id] || BY_ID[id].paused) return false;
+    const r = adjustFor(id, troubles);
+    if (track && r.from) changes.push({ from: r.from, to: r.id, area: r.area, why: r.why, dup: !!(r.id && out.includes(r.id)) });
+    if (!r.id || out.includes(r.id)) return false;
+    out.push(r.id); if (r.cues.length) cues[r.id] = r.cues.join('. ');
+    return true;
+  };
+  // Cardio machines, best first for the pain areas and body.
+  let order = [...CARDIO_ORDER];
+  if (troubles.includes('knee') || troubles.includes('ankle')) order = ['recumbent_bike', 'upright_bike', 'cross_trainer', 'treadmill'];
+  const cardioIds = order.filter(id => adjustFor(id, troubles).id === id).slice(0, 2);
+  if (bmi && bmi.band === 'obese') notes.push('Cardio is kept low-impact (bikes, cross trainer, walking) to go easy on the knees and hips.');
+  if (bmi && bmi.band === 'under') notes.push('Your BMI is under 18.5, so cardio is kept short and the focus is on building strength. Eat enough to fuel it.');
+
+  if (M.cardioFocus) {
+    CARDIO_CORE.forEach(id => add(id, true));
+    const core = out.slice(0, 2); out.length = 0; out.push(...core);
+    const dur = bmi && bmi.band === 'under' ? 25 : 60;
+    return { mood, items: cardioIds.concat(out), cues, changes, notes,
+      session: { title: 'Only cardio', items: cardioIds.concat(out), cardio: dur, cardioFocus: true, coreMins: M.coreMin } };
+  }
+  const focus = session && !session.rest && session.focus ? session.focus : 'full';
+  const base = focus === 'full' ? FULL_BODY : (session.items || []).filter(id => BY_ID[id] && BY_ID[id].g !== 'cardio');
+  base.forEach(id => add(id, true));
+  // Free weights on top of the usual moves, a different pick each day.
+  const pool = FREE_ADD[focus], start = Math.abs(Math.floor(seed)) % pool.length; let added = 0;
+  for (let i = 0; i < pool.length && added < M.freeAdd; i++) if (add(pool[(start + i) % pool.length], false)) added++;
+  if (added < M.freeAdd && focus !== 'full') { // pain areas ruled some out: top up from the full-body list
+    const full = FREE_ADD.full; for (let i = 0; i < full.length && added < M.freeAdd; i++) if (add(full[(start + i) % full.length], false)) added++; }
+  const lifts = out.filter(id => BY_ID[id].g !== 'core').concat(out.filter(id => BY_ID[id].g === 'core'));
+  const cardio = bmi && bmi.band === 'under' ? 10 : M.cardio;
+  return { mood, items: lifts.concat(cardioIds), cues, changes, notes,
+    session: { title: M.label, items: lifts.concat(cardioIds), cardio, liftMins: M.liftMin, coreMins: M.coreMin } };
+}
+
+/** Weight to suggest for a machine: progression on a normal or heavy day, about 60% of last time on a light day. */
+export function suggestLoad(last, mood) {
+  const M = MOOD_BY[mood];
+  if (M && M.loadPct && last && last.kg != null) {
+    const kg = Math.max(0, Math.round(last.kg * M.loadPct * 2) / 2);
+    return { kg, reason: 'Light day: about ' + Math.round(M.loadPct * 100) + '% of your last weight' };
+  }
+  return nextStep(last);
+}
+
+/** Estimated kcal for a planned session: MET \u00d7 kg \u00d7 hours, block by block. Returns a rounded number or null. */
+export function estimateKcal(plan, mood, weightKg) {
+  const M = MOOD_BY[mood], w = Number(weightKg); if (!plan || !M || !(w >= 30)) return null;
+  let metMin = plan.warm * MET.warm + plan.cool * MET.cool;
+  plan.steps.forEach(s => { metMin += s.dur * (BY_ID[s.id].g === 'core' ? MET.core : M.met); });
+  if (plan.cardio) metMin += plan.cardio.dur * M.cardioMet;
+  return Math.round(metMin * w / 60 / 10) * 10;
 }

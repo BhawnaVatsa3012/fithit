@@ -61,7 +61,7 @@ test('a suggested weight is not saved unless reps are logged', () => {
 
 /* ---------- v3: planner, protein by weight, your own exercises and foods ---------- */
 import { buildPlan, foodMeasure, amountTotals, exerciseCount, kcalBurned } from '../src/model.js';
-import { SESSIONS, FOOD_BY } from '../src/catalogue.js';
+import { SESSIONS, FOOD_BY, BY_ID } from '../src/catalogue.js';
 
 test('protein by weight: 120 g paneer = 21.6 g protein, 324 kcal', () => {
   assert.deepEqual(amountTotals(foodMeasure(FOOD_BY.paneer), 120), { p: 21.6, k: 324 });
@@ -108,3 +108,77 @@ test('planner: Saturday in 1 hr is bike first, then all three core moves', () =>
   assert.ok(p.cardio.start < p.steps[0].start); assert.deepEqual(p.steps.map(s => s.id), ['dead_bug', 'bird_dog', 'plank']);
   assert.equal(p.cardio.dur, 33); assert.equal(p.coolStart + p.cool + p.spare, 60);
 });
+
+/* ---------- v4: today's routine (mood, pain areas, body) ---------- */
+import { buildRoutine, adjustFor, bmiOf, whrLimitFor, suggestLoad, estimateKcal } from '../src/model.js';
+import { MOODS } from '../src/catalogue.js';
+
+test('BMI: 160 cm, 78 kg = 30.5; obese on the Indian lines and the WHO lines', () => {
+  assert.deepEqual(bmiOf(160, 78), { v: 30.5, band: 'obese', who: 'obese' });
+});
+test('BMI: 24 counts as overweight in India but normal for WHO', () => {
+  assert.deepEqual(bmiOf(170, 69.4), { v: 24, band: 'over', who: 'normal' });
+  assert.equal(bmiOf(0, 70), null); assert.equal(bmiOf(170, ''), null);
+});
+test('waist-to-hip line follows sex: women 0.85, men 0.90, women if not set', () => {
+  assert.equal(whrLimitFor('f'), 0.85); assert.equal(whrLimitFor('m'), 0.9); assert.equal(whrLimitFor(null), 0.85);
+});
+test('shoulder trouble swaps the shoulder press for a landmine press and says why', () => {
+  assert.deepEqual(adjustFor('shoulder_press', ['shoulder']), { id: 'landmine_press', from: 'shoulder_press', area: 'shoulder', why: 'pressing straight overhead', cues: ['Stop if it pinches'] });
+});
+test('a swap that another pain area also rules out is dropped instead', () => {
+  // knee says goblet squat -> box squat; fine. Ankle says step-up -> leg press; knee keeps leg press with a cue.
+  assert.equal(adjustFor('db_step_up', ['knee', 'ankle']).id, 'glute_bridge');
+  assert.equal(adjustFor('shadow_box', ['ankle']).id, null);
+});
+test('exercises that stay collect a cue from every pain area', () => {
+  assert.deepEqual(adjustFor('leg_press', ['knee', 'back']).cues, ['Bend knees only to about 60°', 'Hips stay flat on the pad, shallow range']);
+  assert.deepEqual(adjustFor('chest_press', []), { id: 'chest_press', cues: [] });
+});
+test('heavy upper day with shoulder trouble: no overhead pressing anywhere, 3 free weights added', () => {
+  const r = buildRoutine({ mood: 'heavy', troubles: ['shoulder'], session: SESSIONS.upperA, seed: 0 });
+  ['shoulder_press', 'db_shoulder', 'dip', 'pullover', 'db_ohtri', 'db_fly'].forEach(id => assert.ok(!r.items.includes(id), id));
+  assert.ok(r.items.includes('landmine_press')); assert.deepEqual(r.changes.map(c => c.from), ['shoulder_press']);
+  const free = r.items.filter(id => !SESSIONS.upperA.items.includes(id) && BY_ID[id].g !== 'cardio' && id !== 'landmine_press');
+  assert.equal(free.length, 3); free.forEach(id => assert.equal(BY_ID[id].g, 'free'));
+});
+test('free-weight picks rotate from day to day', () => {
+  const a = buildRoutine({ mood: 'heavy', session: SESSIONS.upperA, seed: 0 }).items, b = buildRoutine({ mood: 'heavy', session: SESSIONS.upperA, seed: 1 }).items;
+  assert.notDeepEqual(a, b);
+});
+test('heavy legs day with knee and back trouble: no lunges, step-ups, swings or deep squats; still 3 free weights', () => {
+  const r = buildRoutine({ mood: 'heavy', troubles: ['knee', 'back'], session: SESSIONS.legs, seed: 0 });
+  ['goblet_squat', 'db_reverse_lunge', 'db_step_up', 'kb_swing', 'smith', 'db_rdl'].forEach(id => assert.ok(!r.items.includes(id), id));
+  const added = r.items.filter(id => !SESSIONS.legs.items.includes(id) && BY_ID[id].g !== 'cardio');
+  assert.equal(added.length, 3); assert.ok(r.cues.leg_press.includes('60'));
+  assert.equal(r.items[r.items.length - 2], 'recumbent_bike'); // knee trouble: seated bike first
+});
+test('light day: 2 sets of 4 minutes per machine, 20 min cardio, 2 free weights', () => {
+  const r = buildRoutine({ mood: 'light', session: SESSIONS.upperB, seed: 2 });
+  assert.equal(r.session.liftMins, 4); assert.equal(r.session.cardio, 20);
+  assert.equal(r.items.filter(id => !SESSIONS.upperB.items.includes(id) && BY_ID[id].g !== 'cardio').length, 2);
+});
+test('only cardio: two cardio machines and two core moves, cardio first in the plan', () => {
+  const r = buildRoutine({ mood: 'cardio', troubles: ['wrist'], session: SESSIONS.upperA });
+  assert.deepEqual(r.items, ['recumbent_bike', 'cross_trainer', 'dead_bug', 'bird_dog']); assert.equal(r.cues.bird_dog, 'On fists, wrists straight');
+  const p = buildPlan(r.session, 60); assert.ok(p.cardio.start < p.steps[0].start); assert.equal(p.cardio.dur, 37);
+});
+test('rest day or Saturday + heavy = a full-body session', () => {
+  const r = buildRoutine({ mood: 'heavy', session: SESSIONS.rest, seed: 0 });
+  ['leg_press', 'chest_press', 'lat_pulldown'].forEach(id => assert.ok(r.items.includes(id)));
+});
+test('underweight: shorter cardio, with a note', () => {
+  const r = buildRoutine({ mood: 'heavy', session: SESSIONS.upperA, bmi: bmiOf(170, 50) });
+  assert.equal(r.session.cardio, 10); assert.equal(r.notes.length, 1);
+});
+test('light-day weight is about 60% of last time, rounded to 0.5 kg', () => {
+  assert.deepEqual(suggestLoad({ kg: 25, reps: 12 }, 'light'), { kg: 15, reason: 'Light day: about 60% of your last weight' });
+  assert.equal(suggestLoad({ kg: 22.5, reps: 12 }, 'light').kg, 13.5);
+  assert.equal(suggestLoad({ kg: 40, reps: 15 }, 'heavy').kg, 42.5); assert.equal(suggestLoad(null, 'light'), null);
+});
+test('kcal estimate: MET x kg x hours, block by block', () => {
+  const plan = { warm: 10, cool: 5, steps: [{ id: 'chest_press', dur: 6 }, { id: 'plank', dur: 4 }], cardio: { dur: 20 } };
+  // (10x3.5 + 5x2.3 + 6x5.0 + 4x2.8 + 20x5.0) = 187.7 MET-min x 78 kg / 60 = 244 -> 240
+  assert.equal(estimateKcal(plan, 'heavy', 78), 240); assert.equal(estimateKcal(plan, 'heavy', null), null);
+});
+test('every mood has a label and a note', () => { MOODS.forEach(m => { assert.ok(m.label); assert.ok(m.note); }); });
