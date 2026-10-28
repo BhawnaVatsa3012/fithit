@@ -261,7 +261,7 @@ export function buildRoutine({ mood, troubles = [], sharp = [], session, bmi = n
   const lifts = out.filter(id => BY_ID[id].g !== 'core').concat(out.filter(id => BY_ID[id].g === 'core'));
   const cardio = bmi && bmi.band === 'under' ? 10 : M.cardio;
   return { mood, items: lifts.concat(cardioIds), cues, changes, notes,
-    session: { title: M.label, items: lifts.concat(cardioIds), cardio, liftMins: M.liftMin, coreMins: M.coreMin, prio } };
+    session: { title: M.label, items: lifts.concat(cardioIds), cardio, liftMins: focus === 'strength' ? Math.min(M.liftMin, 4) : M.liftMin, coreMins: M.coreMin, prio } };
 }
 
 /** Weight to suggest for a machine: progression on a normal or heavy day, about 60% of last time on a light day. */

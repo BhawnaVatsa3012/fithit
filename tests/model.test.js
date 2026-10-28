@@ -222,7 +222,7 @@ test('C4: sharp only counts for areas that are ticked', () => {
 });
 
 /* ---------- v4.1: fixed day pattern + focus dropdown ---------- */
-import { dayTypeFor, sessionForType, fitsDayType, DAY_TYPES, MACHINES, legacyPlanFor } from '../src/catalogue.js';
+import { dayTypeFor, sessionForType, fitsDayType, DAY_TYPES, MACHINES, legacyPlanFor, GUIDE, CUES } from '../src/catalogue.js';
 test('v4.1: weekdays run Lower, Upper, Cardio, Strength around the rest day; Saturday cardio, Sunday off', () => {
   assert.deepEqual([1, 2, 3, 4, 5, 6, 0].map(d => dayTypeFor(d, 3)), ['lower', 'upper', 'rest', 'cardio', 'strength', 'cardio', 'holiday']);
   assert.deepEqual([1, 2, 3, 4, 5].map(d => dayTypeFor(d, 1)), ['rest', 'lower', 'upper', 'cardio', 'strength']);
@@ -245,13 +245,13 @@ test('v4.1: the other-exercises list follows the focus', () => {
   assert.ok(list('cardio').every(id => BY_ID[id].g === 'cardio'));
   assert.ok(list('upper').includes('chest_press') && !list('upper').includes('leg_press') && !list('upper').includes('goblet_squat') && !list('upper').includes('plank'));
   assert.ok(list('lower').includes('leg_press') && list('lower').includes('goblet_squat') && list('lower').includes('plank') && !list('lower').includes('chest_press'));
-  assert.equal(list('strength').length, MACHINES.length);
+  assert.ok(list('strength').includes('rope_pull') && list('strength').includes('kb_swing') && !list('strength').includes('leg_press') && !list('strength').includes('chest_press'));
 });
 test('v4.1: switching focus changes the routine (upper vs lower)', () => {
   const up = buildRoutine({ mood: 'light', session: sessionForType('upper'), seed: 0 }).items, lo = buildRoutine({ mood: 'light', session: sessionForType('lower'), seed: 0 }).items;
   assert.ok(up.includes('chest_press') && !up.includes('leg_press')); assert.ok(lo.includes('leg_press') && !lo.includes('chest_press'));
   const st = buildRoutine({ mood: 'heavy', session: sessionForType('strength'), seed: 0 }).items;
-  assert.ok(st.includes('leg_press') && st.includes('lat_pulldown'));
+  assert.ok(st.includes('rope_pull') && st.includes('battle_rope') && !st.includes('leg_press') && !st.includes('chest_press'));
 });
 test('v4.1: the focus is saved with a gym day; Only cardio saves as cardio', () => {
   assert.equal(normalize({ machines: ['chest_press'], dtype: 'upper' }).dtype, 'upper');
@@ -260,3 +260,14 @@ test('v4.1: the focus is saved with a gym day; Only cardio saves as cardio', () 
   assert.equal(normalize({ cardio: { treadmill: 100 }, mood: 'cardio', dtype: 'upper' }).dtype, 'cardio');
 });
 test('v4.1: older days keep their old names', () => { assert.equal(legacyPlanFor(4, 3).title, 'Upper body B'); });
+test('v4.1: Strength day is functional: ropes, carries, slams, each with a how-to guide', () => {
+  const s = sessionForType('strength');
+  ['rope_pull', 'battle_rope', 'ball_slam', 'farmer_carry'].forEach(id => assert.ok(s.items.includes(id), id));
+  s.items.filter(id => BY_ID[id].g !== 'cardio').forEach(id => assert.ok(GUIDE[id] && CUES[id], id + ' needs a guide and cue'));
+});
+test('v4.1: strength day respects pain areas (back skips slams, shoulder skips overhead slams)', () => {
+  const b = buildRoutine({ mood: 'heavy', troubles: ['back'], session: sessionForType('strength'), seed: 0 });
+  assert.ok(!b.items.includes('ball_slam') && !b.items.includes('kb_swing')); assert.ok(b.cues.rope_pull);
+  const sh = buildRoutine({ mood: 'heavy', troubles: ['shoulder'], session: sessionForType('strength'), seed: 0 });
+  assert.ok(!sh.items.includes('ball_slam')); assert.ok(sh.cues.battle_rope);
+});

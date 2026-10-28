@@ -55,7 +55,10 @@ export const MACHINES = [
   { id: 'mountain_slow', name: 'Slow mountain climbers (hands on bench)', g: 'func', m: ['Core', 'Cardio'], load: 'time' },
   { id: 'bear_hold', name: 'Bear hold', g: 'func', m: ['Core'], load: 'time' },
   { id: 'side_plank', name: 'Side plank', g: 'func', m: ['Core'], load: 'time' },
-  { id: 'shadow_box', name: 'Shadow boxing', g: 'func', m: ['Cardio', 'Shoulders'], load: 'time' }];
+  { id: 'shadow_box', name: 'Shadow boxing', g: 'func', m: ['Cardio', 'Shoulders'], load: 'time' },
+  { id: 'rope_pull', name: 'Rope pull (hand over hand)', g: 'func', m: ['Back', 'Arms', 'Core'], load: 'time' },
+  { id: 'battle_rope', name: 'Battle ropes', g: 'func', m: ['Shoulders', 'Arms', 'Core'], load: 'time' },
+  { id: 'ball_slam', name: 'Medicine ball slam', g: 'func', m: ['Shoulders', 'Core', 'Back'], load: 'reps' }];
 export const BY_ID = Object.fromEntries(MACHINES.map(m => [m.id, m]));
 
 export const CUES = {
@@ -71,6 +74,7 @@ export const CUES = {
   db_bench: 'Forearms vertical, lower slowly', db_row: 'Bench supports your back', db_shoulder: 'Back against the bench',
   db_fly: 'Light weight, soft elbows', db_curl: 'Elbows pinned to your sides', db_hammer: 'Palms face each other',
   db_ohtri: 'Seated with back support', glute_bridge: 'Knee- and back-friendly', goblet_box: 'High box only: knee bend about 60\u00b0',
+  rope_pull: 'Hand over hand, 30\u201340 s, back straight', battle_rope: 'Waves for 20\u201330 s, knees soft', ball_slam: 'Light ball, 8\u201310 slams, hinge at the hips',
   farmer_carry: '30\u201340 s, walk tall', suitcase_carry: '20\u201330 s per side, don\u2019t lean', incline_pushup: 'Hands on a bench, body straight',
   sit_to_stand: 'High bench, knee bend about 60\u00b0', mountain_slow: 'Slow knee drives, 30 s', bear_hold: 'Knees 2 cm off the floor, 20 s',
   side_plank: 'On knees if needed, 15\u201320 s a side', shadow_box: 'Light on your feet, 1 min rounds',
@@ -90,7 +94,7 @@ export const RANK = {
   goblet_squat: 1, db_reverse_lunge: 1, kb_swing: 1, db_incline_row: 1, db_floor_press: 1, landmine_press: 1,
   db_step_up: 2, db_reverse_fly: 2, face_pull: 2, db_shrug: 2, zottman_curl: 3, db_skull: 3,
   dead_bug: 4, bird_dog: 4, plank: 4, crunch: 4, back_ext: 4,
-  farmer_carry: 5, suitcase_carry: 5, incline_pushup: 5, sit_to_stand: 5, mountain_slow: 5, bear_hold: 5, side_plank: 5, shadow_box: 5 };
+  rope_pull: 2, battle_rope: 2, ball_slam: 3, farmer_carry: 5, suitcase_carry: 5, incline_pushup: 5, sit_to_stand: 5, mountain_slow: 5, bear_hold: 5, side_plank: 5, shadow_box: 5 };
 export const RANK_WHY = {
   1: 'Big multi-joint move: first, while you\u2019re fresh', 2: 'Works one muscle: after the big moves',
   3: 'Small arm muscle: last of the weights, the big moves already tired it', 4: 'Core: near the end, so it steadied you through the lifts',
@@ -137,6 +141,9 @@ export const GUIDE = {
   glute_bridge: { s: 'Lie on your back, knees bent, feet flat and hip-width apart. Optional: a dumbbell resting on your hips.', st: ['Squeeze your glutes and lift your hips until your body is straight from knees to shoulders.', 'Hold for 1\u20132 seconds, then lower slowly.'], a: 'Pushing through your toes or over-arching your lower back.' },
   goblet_box: { s: 'Hold one dumbbell upright against your chest. Stand just in front of a high box or bench, feet shoulder-width.', st: ['Sit back and down until you lightly touch the box.', 'Stand up by pushing through your whole foot.'], a: 'A low box: keep your knee bend to about 60\u00b0, the same limit as the leg press.' },
   db_rdl: { s: 'Stand holding the dumbbells in front of your thighs.', st: ['Push your hips back with a flat back until you feel a hamstring stretch.', 'Stand back up by squeezing your glutes.'], a: 'Paused for you: it loads the lower back.' },
+  rope_pull: { s: 'Stand tall facing the sled or rope machine, feet hip-width, knees soft. Or sit on the floor with legs out if your back prefers.', st: ['Grab the rope at arm\u2019s length with both hands.', 'Pull it in hand over hand, elbows close to your body, shoulders down.', 'Keep a steady rhythm for 30\u201340 seconds. Rest 60 seconds.'], a: 'Rounding your back or yanking with your lower back instead of your arms.' },
+  battle_rope: { s: 'Feet shoulder-width, knees soft, hips back a little, chest up. One rope end in each hand.', st: ['Move your arms up and down fast to send waves down the ropes.', 'Keep the waves small and steady, below shoulder height.', '20\u201330 seconds on, 40 seconds rest.'], a: 'Squatting deep, holding your breath or swinging from the lower back.' },
+  ball_slam: { s: 'Feet shoulder-width, a light medicine ball (3\u20135 kg) held at your chest.', st: ['Lift the ball to about head height.', 'Hinge at the hips and throw it down hard in front of your feet.', 'Bend your knees a little to pick it up with a flat back. 8\u201310 slams.'], a: 'Rounding your back to pick it up, or a ball that bounces back at your face.' },
   farmer_carry: { s: 'Pick up a fairly heavy dumbbell in each hand, bending your knees, not your back. Stand tall.', st: ['Walk with short, steady steps for 30\u201340 seconds.', 'Keep your shoulders down and tummy braced.', 'Bend your knees to put the weights down. Rest 60 seconds.'], a: 'Leaning to one side or rounding your shoulders.' },
   suitcase_carry: { s: 'Hold one dumbbell in one hand only, the other hand free.', st: ['Walk tall for 20\u201330 seconds without leaning towards the weight.', 'Switch hands and repeat.'], a: 'Tipping sideways: your core\u2019s job is to stop that.' },
   incline_pushup: { s: 'Hands on a bench or a racked bar, a little wider than your shoulders. Walk your feet back so your body is straight.', st: ['Lower your chest towards the bench, elbows at about 45\u00b0 from your body.', 'Push back up. The higher the hands, the easier it is.'], a: 'Hips sagging, or the head poking forward.' },
@@ -179,8 +186,8 @@ export const SESSIONS = {
   legs2: { focus: 'lower', title: 'Legs (knee-safe) + core', rx: RX, note: WU + '40 min incline walk or cross trainer.', cardio: 40, items: LEGS.concat(['treadmill', 'cross_trainer']) },
   // Cardio day: cardio machines only, nothing else (v4.1).
   saturday: { focus: 'cardio', title: 'Cardio', rx: [{ label: 'Total', value: '1 hr' }, { label: 'Cardio', value: '45 min' }, { label: 'Pace', value: 'Intervals' }], note: '10 min easy warm-up, then 45 min intervals on the bikes or cross trainer. Cardio only today.', cardio: 45, cardioFocus: true, items: ['recumbent_bike', 'upright_bike', 'cross_trainer'], cues: { recumbent_bike: '2 min easy, 1 min harder \u00d7 10\u201312 rounds', upright_bike: '2 min easy, 1 min harder \u00d7 10\u201312 rounds', cross_trainer: '3 min easy, 1 min harder, or steady at a pace where you can talk' } },
-  // Strength day: big compound moves, machines and free weights, whole body (v4.1).
-  strength: { focus: 'strength', title: 'Strength training', rx: [{ label: 'Sets', value: '3' }, { label: 'Reps', value: '8\u201312' }, { label: 'Rest', value: '90 s' }, { label: 'Cardio', value: '15 min' }], note: '10 min easy bike warm-up. Big moves for the whole body with machines and free weights, then 15 min easy cardio.', cardio: 15, items: ['leg_press', 'goblet_box', 'chest_press', 'lat_pulldown', 'db_incline_row', 'db_floor_press', 'glute_bridge', 'plank', 'cross_trainer'] },
+  // Strength day: functional strength with ropes, carries, slams and kettlebell (v4.1).
+  strength: { focus: 'strength', title: 'Strength training', rx: [{ label: 'Rounds', value: '3' }, { label: 'Work', value: '30 s' }, { label: 'Rest', value: '60 s' }, { label: 'Cardio', value: '10 min' }], note: '10 min easy warm-up. Functional strength: rope pulls, battle ropes, carries and slams, 3 rounds each, then 10 min easy cardio.', cardio: 10, liftMins: 4, items: ['rope_pull', 'battle_rope', 'kb_swing', 'ball_slam', 'farmer_carry', 'face_pull', 'suitcase_carry', 'bear_hold', 'cross_trainer'] },
   rest: { rest: true, title: 'Rest day', note: 'Muscle rebuilds on rest days. A relaxed walk is fine. If you do go in, keep it to cardio only.' },
   sunday: { rest: true, title: 'Holiday', note: 'Sunday off. Enjoy it.' } };
 /* v4.1: a fixed pattern of day types. The four weekday training days run Lower, Upper, Cardio, Strength in that order
@@ -220,7 +227,7 @@ export function fitsDayType(m, type) {
   if (!m || !DAY_TYPE_LABEL[type]) return true;
   if (m.g === 'cardio') return true;
   if (type === 'cardio') return false;
-  if (type === 'strength') return true;
+  if (type === 'strength') return m.g === 'func' || m.g === 'free' || m.id === 'face_pull'; // ropes, carries, slams, free weights
   const mus = m.m || [];
   if (type === 'upper') return m.g === 'upper' || (m.g !== 'lower' && m.g !== 'core' && mus.some(x => UPPER_M.includes(x)) && !mus.includes('Legs'));
   return m.g === 'lower' || m.g === 'core' || mus.includes('Legs') || (m.g === 'func' && mus.every(x => x === 'Core' || x === 'Cardio')); // lower body + core
@@ -285,41 +292,48 @@ export const TROUBLE_RULES = {
       rower: ['recumbent_bike', 'deep knee bend on every stroke'] },
     mod: { leg_press: 'Bend knees only to about 60\u00b0', leg_ext: 'Lift only to half-straight, light weight', goblet_box: 'High box: knee bend about 60\u00b0',
       sit_to_stand: 'High bench, knee bend about 60\u00b0', upright_bike: 'Seat high: knee slightly bent at the bottom', recumbent_bike: 'Seat far enough that the knee stays slightly bent',
-      treadmill: 'Walk only, no running', shadow_box: 'Feet planted, no bouncing', kb_swing: 'Hinge at the hips, knees only soft', mountain_slow: 'Small, slow knee drives' } },
+      treadmill: 'Walk only, no running', shadow_box: 'Feet planted, no bouncing', kb_swing: 'Hinge at the hips, knees only soft', mountain_slow: 'Small, slow knee drives',
+      battle_rope: 'Knees soft, no deep squat', ball_slam: 'Hinge at the hips, don\u2019t squat to pick it up', rope_pull: 'Knees soft, or sit on the floor' } },
   shoulder: {
     skip: { shoulder_press: ['landmine_press', 'pressing straight overhead'], db_shoulder: ['landmine_press', 'pressing straight overhead'],
       dip: ['tricep_ext', 'deep stretch at the front of the shoulder'], pullover: ['db_incline_row', 'arms overhead under load'],
-      db_ohtri: ['tricep_ext', 'arms overhead under load'], db_fly: ['db_floor_press', 'big stretch at the front of the shoulder'] },
+      db_ohtri: ['tricep_ext', 'arms overhead under load'], db_fly: ['db_floor_press', 'big stretch at the front of the shoulder'], ball_slam: ['farmer_carry', 'arms overhead at speed'] },
     mod: { lat_pulldown: 'Pull to upper chest only, never behind the neck', pec_deck: 'Don\u2019t open past your chest line', chest_press: 'Elbows about 45\u00b0 from your body',
       db_bench: 'Elbows about 45\u00b0, stop at chest level', db_floor_press: 'Elbows about 45\u00b0 from your body', db_lateral: 'Light, lift only to just below shoulder height',
       incline_pushup: 'Hands high, elbows tucked in', landmine_press: 'Stop if it pinches', kb_swing: 'Arms just guide the bell, chest height only',
-      side_plank: 'On your elbow, knees down', shadow_box: 'Slow punches, don\u2019t snap the arm straight', face_pull: 'Light weight, smooth', db_reverse_fly: 'Very light' } },
+      side_plank: 'On your elbow, knees down', shadow_box: 'Slow punches, don\u2019t snap the arm straight', face_pull: 'Light weight, smooth', db_reverse_fly: 'Very light',
+      battle_rope: 'Small waves, below shoulder height', rope_pull: 'Pull to your chest, elbows low' } },
   back: {
-    skip: { smith: ['leg_press', 'the bar loads your spine'], db_rdl: ['glute_bridge', 'bending forward under load'], kb_swing: ['glute_bridge', 'fast forward bending'],
+    skip: { smith: ['leg_press', 'the bar loads your spine'], db_rdl: ['glute_bridge', 'bending forward under load'], kb_swing: ['glute_bridge', 'fast forward bending'], ball_slam: ['bear_hold', 'fast forward bending'],
       crunch: ['dead_bug', 'repeated curling of the spine'], back_ext: ['bird_dog', 'arching the back under load'], rower: ['cross_trainer', 'rounded back on every stroke'],
       db_row: ['db_incline_row', 'bent-over position'], goblet_squat: ['goblet_box', 'weight held in front during a deep squat'] },
     mod: { leg_press: 'Hips stay flat on the pad, shallow range', shoulder_press: 'Back flat on the pad', db_shoulder: 'Seated, back against the bench',
       farmer_carry: 'Lighter weight, stand tall', suitcase_carry: 'Light, don\u2019t lean', plank: 'On your knees, 20 s', glute_bridge: 'Don\u2019t over-arch at the top',
       db_reverse_lunge: 'Chest upright, light weight', db_step_up: 'Chest upright', db_ohtri: 'Seated with back support', goblet_box: 'Chest upright',
-      treadmill: 'Walk, low incline', landmine_press: 'Ribs down, don\u2019t arch' } },
+      treadmill: 'Walk, low incline', landmine_press: 'Ribs down, don\u2019t arch',
+      rope_pull: 'Sit on the floor to pull, back tall', battle_rope: 'Stand tall, small waves, tummy braced' } },
   neck: {
     skip: { db_shrug: ['db_reverse_fly', 'loads the neck muscles directly'] },
     mod: { lat_pulldown: 'Look straight ahead, never behind the neck', farmer_carry: 'Shoulders down, lighter', suitcase_carry: 'Shoulders down',
-      shoulder_press: 'Head against the pad, look ahead', dead_bug: 'Head resting on the mat', plank: 'Look at the floor, neck long', landmine_press: 'Look straight ahead' } },
+      shoulder_press: 'Head against the pad, look ahead', dead_bug: 'Head resting on the mat', plank: 'Look at the floor, neck long', landmine_press: 'Look straight ahead',
+      battle_rope: 'Small waves, shoulders away from your ears', rope_pull: 'Look ahead, shoulders down' } },
   wrist: {
     skip: { bear_hold: ['dead_bug', 'weight on bent wrists'], mountain_slow: ['dead_bug', 'weight on bent wrists'],
       db_skull: ['tricep_ext', 'strain on the wrist at the bottom'], zottman_curl: ['db_hammer', 'twisting the wrist under load'] },
     mod: { incline_pushup: 'On fists or push-up handles, wrists straight', bird_dog: 'On fists, wrists straight', plank: 'On your forearms',
-      db_curl: 'Wrists straight, lighter', farmer_carry: 'Lighter, or use straps', suitcase_carry: 'Lighter', db_bench: 'Wrists stacked over elbows', side_plank: 'On your forearm' } },
+      db_curl: 'Wrists straight, lighter', farmer_carry: 'Lighter, or use straps', suitcase_carry: 'Lighter', db_bench: 'Wrists stacked over elbows', side_plank: 'On your forearm',
+      battle_rope: 'Loose grip, wrists straight', rope_pull: 'Wear gloves, wrists straight', ball_slam: 'Soft ball, wrists straight' } },
   elbow: {
     skip: { db_skull: ['tricep_ext', 'strains the elbow'], dip: ['tricep_ext', 'strains the elbow at the bottom'], db_ohtri: ['tricep_ext', 'elbow fully bent under load'],
       zottman_curl: ['db_hammer', 'twisting the forearm under load'] },
     mod: { bicep_curl: 'Lighter, don\u2019t lock out', db_curl: 'Lighter, no swinging', tricep_ext: 'Lighter, smooth', db_hammer: 'Lighter',
-      incline_pushup: 'Elbows soft at the top', farmer_carry: 'Lighter' } },
+      incline_pushup: 'Elbows soft at the top', farmer_carry: 'Lighter',
+      battle_rope: 'Small waves, elbows soft', rope_pull: 'Smooth pulls, no jerking', ball_slam: 'Lighter ball' } },
   ankle: {
     skip: { db_step_up: ['leg_press', 'balancing on one ankle'], db_reverse_lunge: ['glute_bridge', 'balancing on one ankle'], shadow_box: [null, 'bouncing on your feet'] },
     mod: { treadmill: 'Walk on a flat or low incline', cross_trainer: 'Low resistance, heels down', calf: 'Light, small range, stop if sore',
-      farmer_carry: 'Short walks on a flat floor', suitcase_carry: 'Short walks', goblet_squat: 'Heels flat' } } };
+      farmer_carry: 'Short walks on a flat floor', suitcase_carry: 'Short walks', goblet_squat: 'Heels flat',
+      battle_rope: 'Feet planted, no jumping' } } };
 
 /* Sharp pain today: rest the whole region instead of working around it. muscles = rest any exercise working these;
    only = the only lifts allowed; cardio = the only cardio allowed (null = any). */
@@ -342,7 +356,7 @@ export const FREE_ADD = {
   upper: ['db_incline_row', 'db_floor_press', 'landmine_press', 'db_reverse_fly', 'face_pull', 'zottman_curl', 'db_skull', 'db_shrug'],
   lower: ['goblet_squat', 'kb_swing', 'db_reverse_lunge', 'db_step_up', 'glute_bridge'],
   full: ['goblet_squat', 'db_incline_row', 'db_floor_press', 'kb_swing', 'db_reverse_fly', 'landmine_press'],
-  strength: ['kb_swing', 'db_reverse_fly', 'landmine_press', 'db_reverse_lunge', 'face_pull', 'db_step_up'] };
+  strength: ['incline_pushup', 'shadow_box', 'glute_bridge', 'side_plank', 'db_incline_row', 'goblet_box'] };
 /** Base for heavy or light on a day without a weights session (Saturday, rest day, Sunday). */
 export const FULL_BODY = ['leg_press', 'chest_press', 'lat_pulldown', 'glute_bridge', 'dead_bug', 'bird_dog'];
 export const CARDIO_CORE = ['dead_bug', 'bird_dog', 'side_plank'];
