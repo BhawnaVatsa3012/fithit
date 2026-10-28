@@ -1,5 +1,5 @@
 // Pure data logic: no DOM, no network. Covered by tests/model.test.js.
-import { MEALS, FOOD_BY, BY_ID, PROGRESSION, RANK, MINUTES, MOOD_BY, TROUBLE_RULES, CARDIO_ORDER, FREE_ADD, FULL_BODY, CARDIO_CORE, BMI_BANDS, WHR_LIMIT, MET, SHARP_RULES, MOODS } from './catalogue.js';
+import { MEALS, FOOD_BY, BY_ID, PROGRESSION, RANK, MINUTES, MOOD_BY, TROUBLE_RULES, CARDIO_ORDER, FREE_ADD, FULL_BODY, BMI_BANDS, DAY_TYPE_LABEL, WHR_LIMIT, MET, SHARP_RULES, MOODS } from './catalogue.js';
 
 export const pad = n => String(n).padStart(2, '0');
 export const keyOf = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -117,6 +117,7 @@ export function normalize(d) {
   if (Object.keys(loads).length) out.loads = loads;
   const knee = num(d.knee, 0, 2, 1); if (out.gym && knee != null) out.knee = knee;
   if (out.gym && MOODS.some(m => m.id === d.mood)) out.mood = d.mood;
+  const dt = out.mood === 'cardio' ? 'cardio' : d.dtype; if (out.gym && DAY_TYPE_LABEL[dt]) out.dtype = dt; // the focus you picked for the day (v4.1)
   const meals = {}, extra = {}, extraK = {}, cf = {};
   MEALS.forEach(m => {
     const src = d.meals[m.id] || {}, o = {};
@@ -242,12 +243,11 @@ export function buildRoutine({ mood, troubles = [], sharp = [], session, bmi = n
   if (bmi && bmi.band === 'obese') notes.push('Cardio is kept low-impact (bikes, cross trainer, walking) to go easy on the knees and hips.');
   if (bmi && bmi.band === 'under') notes.push('Your BMI is under 18.5, so cardio is kept short and the focus is on building strength. Eat enough to fuel it.');
 
-  if (M.cardioFocus) {
-    CARDIO_CORE.forEach(id => add(id, true));
-    const core = out.slice(0, 2); out.length = 0; out.push(...core);
-    const dur = bmi && bmi.band === 'under' ? 25 : 60;
-    return { mood, items: cardioIds.concat(out), cues, changes, notes,
-      session: { title: 'Only cardio', items: cardioIds.concat(out), cardio: dur, cardioFocus: true, coreMins: M.coreMin } };
+  // Only cardio, or a Cardio day: cardio machines only, nothing else. The mood sets the pace and length.
+  if (M.cardioFocus || (session && session.focus === 'cardio')) {
+    const dur = bmi && bmi.band === 'under' ? 25 : mood === 'light' ? 30 : mood === 'heavy' ? 45 : 60;
+    return { mood, items: cardioIds, cues, changes, notes,
+      session: { title: M.cardioFocus ? 'Only cardio' : M.label + ': Cardio', items: cardioIds, cardio: dur, cardioFocus: true } };
   }
   const focus = session && !session.rest && session.focus ? session.focus : 'full';
   const base = focus === 'full' ? FULL_BODY : (session.items || []).filter(id => BY_ID[id] && BY_ID[id].g !== 'cardio');

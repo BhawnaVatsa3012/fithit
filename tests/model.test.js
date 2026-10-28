@@ -35,9 +35,10 @@ test('weekly pace', () => {
   assert.equal(Math.round(weeklyPace(checkins(e)) * 100) / 100, -0.7);
 });
 test('rest day moves the weekday sessions', () => {
-  assert.equal(planFor(3, 3).title, 'Rest day'); assert.equal(planFor(4, 3).title, 'Upper body B');
-  assert.equal(planFor(2, 2).title, 'Rest day'); assert.equal(planFor(3, 2).title, 'Legs (knee-safe) + core');
-  assert.equal(planFor(6, 3).title, 'Cardio intervals + core'); assert.equal(planFor(0, 3).title, 'Holiday');
+  assert.equal(planFor(3, 3).title, 'Rest day'); assert.equal(planFor(4, 3).title, 'Cardio');
+  assert.equal(planFor(2, 2).title, 'Rest day'); assert.equal(planFor(3, 2).title, 'Upper body A');
+  assert.equal(planFor(1, 3).title, 'Legs (knee-safe) + core'); assert.equal(planFor(2, 3).title, 'Upper body A'); assert.equal(planFor(5, 3).title, 'Strength training');
+  assert.equal(planFor(6, 3).title, 'Cardio'); assert.equal(planFor(0, 3).title, 'Holiday');
 });
 
 test('waist-to-hip ratio uses the latest check-in with both', () => {
@@ -103,10 +104,9 @@ test('planner: legs day puts leg press first and core after the machines', () =>
 test('planner: nothing for rest days or under 20 minutes', () => {
   assert.equal(buildPlan(SESSIONS.rest, 60), null); assert.equal(buildPlan(SESSIONS.upperA, 15), null);
 });
-test('planner: Saturday in 1 hr is bike first, then all three core moves', () => {
+test('planner: a Cardio day in 1 hr is warm-up, 45 min cardio, stretch, and nothing else', () => {
   const p = buildPlan(SESSIONS.saturday, 60);
-  assert.ok(p.cardio.start < p.steps[0].start); assert.deepEqual(p.steps.map(s => s.id), ['dead_bug', 'bird_dog', 'plank']);
-  assert.equal(p.cardio.dur, 33); assert.equal(p.coolStart + p.cool + p.spare, 60);
+  assert.equal(p.steps.length, 0); assert.equal(p.cardio.dur, 45); assert.equal(p.coolStart + p.cool + p.spare, 60);
 });
 
 /* ---------- v4: today's routine (mood, pain areas, body) ---------- */
@@ -158,10 +158,10 @@ test('light day: 2 sets of 4 minutes per machine, 20 min cardio, 2 free weights'
   assert.equal(r.session.liftMins, 4); assert.equal(r.session.cardio, 20);
   assert.equal(r.items.filter(id => !SESSIONS.upperB.items.includes(id) && BY_ID[id].g !== 'cardio').length, 2);
 });
-test('only cardio: two cardio machines and two core moves, cardio first in the plan', () => {
+test('only cardio: cardio machines only, no core or weights', () => {
   const r = buildRoutine({ mood: 'cardio', troubles: ['wrist'], session: SESSIONS.upperA });
-  assert.deepEqual(r.items, ['recumbent_bike', 'cross_trainer', 'dead_bug', 'bird_dog']); assert.equal(r.cues.bird_dog, 'On fists, wrists straight');
-  const p = buildPlan(r.session, 60); assert.ok(p.cardio.start < p.steps[0].start); assert.equal(p.cardio.dur, 37);
+  assert.deepEqual(r.items, ['recumbent_bike', 'cross_trainer']); assert.ok(r.items.every(id => BY_ID[id].g === 'cardio'));
+  const p = buildPlan(r.session, 60); assert.equal(p.steps.length, 0); assert.equal(p.cardio.dur, 45);
 });
 test('rest day or Saturday + heavy = a full-body session', () => {
   const r = buildRoutine({ mood: 'heavy', session: SESSIONS.rest, seed: 0 });
@@ -214,9 +214,49 @@ test('C4: sharp lower-back pain allows only two gentle core moves and easy cardi
   assert.deepEqual(r.items.filter(id => BY_ID[id].g !== 'cardio'), []);
   assert.ok(r.notes.some(n => /Nothing is safe to lift/.test(n)));
   const c = buildRoutine({ mood: 'cardio', troubles: ['back'], sharp: ['back'], session: SESSIONS.upperA });
-  assert.deepEqual(c.items, ['recumbent_bike', 'treadmill', 'dead_bug', 'bird_dog']);
+  assert.deepEqual(c.items, ['recumbent_bike', 'treadmill']);
 });
 test('C4: sharp only counts for areas that are ticked', () => {
   const r = buildRoutine({ mood: 'heavy', troubles: [], sharp: ['knee'], session: SESSIONS.legs, seed: 0 });
   assert.ok(r.items.includes('leg_press')); assert.equal(r.changes.length, 0);
 });
+
+/* ---------- v4.1: fixed day pattern + focus dropdown ---------- */
+import { dayTypeFor, sessionForType, fitsDayType, DAY_TYPES, MACHINES, legacyPlanFor } from '../src/catalogue.js';
+test('v4.1: weekdays run Lower, Upper, Cardio, Strength around the rest day; Saturday cardio, Sunday off', () => {
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 0].map(d => dayTypeFor(d, 3)), ['lower', 'upper', 'rest', 'cardio', 'strength', 'cardio', 'holiday']);
+  assert.deepEqual([1, 2, 3, 4, 5].map(d => dayTypeFor(d, 1)), ['rest', 'lower', 'upper', 'cardio', 'strength']);
+});
+test('v4.1: every day type has a session, and upper/lower alternate A and B by week', () => {
+  DAY_TYPES.forEach(t => assert.ok(sessionForType(t.id).items.length, t.id));
+  assert.equal(sessionForType('upper', 0).title, 'Upper body A'); assert.equal(sessionForType('upper', 1).title, 'Upper body B');
+  assert.equal(sessionForType('lower', 1), SESSIONS.legs2);
+});
+test('v4.1: a Cardio day has cardio machines only', () => {
+  assert.ok(sessionForType('cardio').items.every(id => BY_ID[id].g === 'cardio'));
+  ['heavy', 'light', 'cardio'].forEach(mood => {
+    const r = buildRoutine({ mood, session: sessionForType('cardio'), seed: 3 });
+    assert.ok(r.items.length && r.items.every(id => BY_ID[id].g === 'cardio'), mood);
+  });
+  assert.ok(buildRoutine({ mood: 'light', session: sessionForType('cardio') }).session.cardio < buildRoutine({ mood: 'heavy', session: sessionForType('cardio') }).session.cardio);
+});
+test('v4.1: the other-exercises list follows the focus', () => {
+  const list = t => MACHINES.filter(m => fitsDayType(m, t)).map(m => m.id);
+  assert.ok(list('cardio').every(id => BY_ID[id].g === 'cardio'));
+  assert.ok(list('upper').includes('chest_press') && !list('upper').includes('leg_press') && !list('upper').includes('goblet_squat') && !list('upper').includes('plank'));
+  assert.ok(list('lower').includes('leg_press') && list('lower').includes('goblet_squat') && list('lower').includes('plank') && !list('lower').includes('chest_press'));
+  assert.equal(list('strength').length, MACHINES.length);
+});
+test('v4.1: switching focus changes the routine (upper vs lower)', () => {
+  const up = buildRoutine({ mood: 'light', session: sessionForType('upper'), seed: 0 }).items, lo = buildRoutine({ mood: 'light', session: sessionForType('lower'), seed: 0 }).items;
+  assert.ok(up.includes('chest_press') && !up.includes('leg_press')); assert.ok(lo.includes('leg_press') && !lo.includes('chest_press'));
+  const st = buildRoutine({ mood: 'heavy', session: sessionForType('strength'), seed: 0 }).items;
+  assert.ok(st.includes('leg_press') && st.includes('lat_pulldown'));
+});
+test('v4.1: the focus is saved with a gym day; Only cardio saves as cardio', () => {
+  assert.equal(normalize({ machines: ['chest_press'], dtype: 'upper' }).dtype, 'upper');
+  assert.equal(normalize({ dtype: 'upper' }).dtype, undefined);
+  assert.equal(normalize({ machines: ['chest_press'], dtype: 'junk' }).dtype, undefined);
+  assert.equal(normalize({ cardio: { treadmill: 100 }, mood: 'cardio', dtype: 'upper' }).dtype, 'cardio');
+});
+test('v4.1: older days keep their old names', () => { assert.equal(legacyPlanFor(4, 3).title, 'Upper body B'); });

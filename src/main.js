@@ -2,8 +2,8 @@ import './style.css';
 import { BY_ID, MEALS, DEFAULT_SETTINGS, TROUBLES } from './catalogue.js';
 import { keyOf, parseKey, addDays, has, clone, ensure, normalize, isEmpty, isGymDay, exerciseCount, lastLoad, suggestLoad, cleanText } from './model.js';
 import { sb, claim, loadAll, saveDay, loadSettings, saveSettings, exportAll, deleteAll, cache, draftStore, clearDevice } from './store.js';
-import { S, auth, ui, today, draftFor, isDirty, anyDirty, viewOf, persistDrafts, derive, rememberMins, rememberMood } from './state.js';
-import { header, switcher, logView, mealsSummary, mealTiles, proteinWeek, mealsView, saveBar, progressView, calendarView, navHtml, authView, guideView, calcResult, calcFoods, programmeFor, moodFor, painCheckedToday } from './views.js';
+import { S, auth, ui, today, draftFor, isDirty, anyDirty, viewOf, persistDrafts, derive, rememberMins, rememberMood, rememberDtype } from './state.js';
+import { header, switcher, logView, mealsSummary, mealTiles, proteinWeek, mealsView, saveBar, progressView, calendarView, navHtml, authView, guideView, calcResult, calcFoods, programmeFor, moodFor, painCheckedToday, dayTypeOf } from './views.js';
 
 /* ---------------- render ---------------- */
 function render() {
@@ -114,7 +114,18 @@ async function doSaveSettings() {
 /* ---------- About you: height, weight, gender, pain areas (v4) ---------- */
 function openAbout() { const st = S.settings; ui.ab = { heightCm: st.heightCm ?? '', weightKg: st.weightKg ?? '', sex: st.sex || '', troubles: [...(st.troubles || [])], sharp: [...(st.troubleSharp || [])] }; }
 /** Today's mood is saved with today's workout, so Recent sessions show which routine you did. */
-function stampMood() { if (ui.selected !== today()) return; const d = draftFor(today()); d.mood = ui.mood || null; persistDrafts(); }
+function stampMood() { if (ui.selected !== today()) return; const d = draftFor(today()); d.mood = ui.mood || null; d.dtype = ui.dtype || null; persistDrafts(); }
+/** Change the day's focus (Lower body, Upper body, Cardio, Strength training). null = back to the weekly pattern. */
+function setDayType(t) {
+  const k = ui.selected, { pattern } = dayTypeOf(k), v = t && t !== pattern && ['lower', 'upper', 'cardio', 'strength'].includes(t) ? t : null;
+  ui.othersOpen = null;
+  if (k === today()) {
+    ui.dtype = v; rememberDtype(v);
+    if (ui.mood === 'cardio' && (v || pattern) !== 'cardio') { ui.mood = null; rememberMood(null); } // Only cardio and a lifting focus can't both apply
+    stampMood();
+  } else { draftFor(k).dtype = v; changed(); }
+  rerender();
+}
 async function saveAbout() {
   const a = ui.ab || {}, out = {};
   const numIn = (v, lo, hi, label) => { if (v === '' || v == null) return { ok: true, v: null }; const n = Number(v);
@@ -174,7 +185,7 @@ document.addEventListener('click', ev => {
       const step = suggestLoad(lastLoad(S.entries, m.id, ui.selected), moodFor(ui.selected));
       if (step) { d.loads[m.id] = { ...(d.loads[m.id] || {}), kg: step.kg, sug: true }; focusSel = '[data-load="' + m.id + '"][data-f="reps"]'; }
     }
-    if (exerciseCount(d)) d.gym = true; if (ui.selected === today()) d.mood = ui.mood || null; changed(); rerender();
+    if (exerciseCount(d)) d.gym = true; if (ui.selected === today()) { d.mood = ui.mood || null; d.dtype = ui.dtype || null; } changed(); rerender();
     const sel = focusSel;
     if ((m.g === 'cardio' ? has(d.cardio, m.id) : d.machines.includes(m.id))) { const inp = document.querySelector(sel); if (inp && !inp.value) inp.focus({ preventScroll: true }); }
     return; }
@@ -195,6 +206,7 @@ document.addEventListener('click', ev => {
     case 'prev': ui.selected = keyOf(addDays(parseKey(ui.selected), -1)); ui.othersOpen = null; rerender(); break;
     case 'next': if (ui.selected < today()) { ui.selected = keyOf(addDays(parseKey(ui.selected), 1)); ui.othersOpen = null; rerender(); } break;
     case 'gym': d = draftFor(ui.selected); if (isGymDay(d)) { d.gym = false; d.machines = []; d.cardio = {}; d.loads = {}; d.knee = null; } else d.gym = true; changed(); rerender(); break;
+    case 'dtypereset': setDayType(null); break;
     case 'about': if (ui.aboutOpen) { ui.aboutOpen = false; ui.ab = null; } else { openAbout(); ui.aboutOpen = true; } rerender(); break;
     case 'trnone': if (!ui.ab) openAbout(); ui.ab.troubles = []; ui.ab.sharp = []; saveAbout(); break;
     case 'trsame': commitSettings({ ...S.settings, troublesAt: today() }).then(ok => { if (ok) { ui.ab = null; rerender(); toast('Same as last time. Routine ready.'); } }); break;
@@ -244,7 +256,8 @@ document.addEventListener('change', ev => { const t = ev.target, ds = t.dataset 
   if (ds.set) { ui.sd = ui.sd || {}; ui.sd[ds.set] = t.value; }
   if (ds.ab) { if (!ui.ab) openAbout(); ui.ab[ds.ab] = t.value; }
   if (ds.calc === 'food') { ui.calc.food = t.value; ui.calc.qty = ''; rerender(); }
-  if (ds.calc === 'u' || ds.cfq != null) rerender(); });
+  if (ds.calc === 'u' || ds.cfq != null) rerender();
+  if (ds.dtype) setDayType(t.value); });
 document.addEventListener('submit', ev => {
   if (ev.target.id !== 'signin') return; ev.preventDefault();
   const email = (document.getElementById('email').value || '').trim(); if (!email) return;

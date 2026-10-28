@@ -177,18 +177,53 @@ export const SESSIONS = {
   legs: { focus: 'lower', title: 'Legs (knee-safe) + core', rx: RX, note: WU + '40 min cross trainer.', cardio: 40, items: LEGS.concat(['cross_trainer']) },
   upperB: { focus: 'upper', title: 'Upper body B', rx: RX, note: WU + '40 min recumbent bike.', cardio: 40, items: ['lat_pulldown', 'pullover', 'chest_press', 'dip', 'db_lateral', 'bicep_curl', 'tricep_ext', 'recumbent_bike'] },
   legs2: { focus: 'lower', title: 'Legs (knee-safe) + core', rx: RX, note: WU + '40 min incline walk or cross trainer.', cardio: 40, items: LEGS.concat(['treadmill', 'cross_trainer']) },
-  saturday: { focus: 'full', title: 'Cardio intervals + core', rx: [{ label: 'Total', value: '1 hr' }, { label: 'Bike', value: '45 min' }, { label: 'Core', value: '10 min' }], note: '45 min bike intervals, then 10 min core on the mat.', cardio: 45, cardioFocus: true, items: ['recumbent_bike', 'upright_bike', 'dead_bug', 'bird_dog', 'plank'], cues: { recumbent_bike: '2 min easy, 1 min harder \u00d7 10\u201312 rounds', upright_bike: '2 min easy, 1 min harder \u00d7 10\u201312 rounds' } },
+  // Cardio day: cardio machines only, nothing else (v4.1).
+  saturday: { focus: 'cardio', title: 'Cardio', rx: [{ label: 'Total', value: '1 hr' }, { label: 'Cardio', value: '45 min' }, { label: 'Pace', value: 'Intervals' }], note: '10 min easy warm-up, then 45 min intervals on the bikes or cross trainer. Cardio only today.', cardio: 45, cardioFocus: true, items: ['recumbent_bike', 'upright_bike', 'cross_trainer'], cues: { recumbent_bike: '2 min easy, 1 min harder \u00d7 10\u201312 rounds', upright_bike: '2 min easy, 1 min harder \u00d7 10\u201312 rounds', cross_trainer: '3 min easy, 1 min harder, or steady at a pace where you can talk' } },
+  // Strength day: big compound moves, machines and free weights, whole body (v4.1).
+  strength: { focus: 'strength', title: 'Strength training', rx: [{ label: 'Sets', value: '3' }, { label: 'Reps', value: '8\u201312' }, { label: 'Rest', value: '90 s' }, { label: 'Cardio', value: '15 min' }], note: '10 min easy bike warm-up. Big moves for the whole body with machines and free weights, then 15 min easy cardio.', cardio: 15, items: ['leg_press', 'goblet_box', 'chest_press', 'lat_pulldown', 'db_incline_row', 'db_floor_press', 'glute_bridge', 'plank', 'cross_trainer'] },
   rest: { rest: true, title: 'Rest day', note: 'Muscle rebuilds on rest days. A relaxed walk is fine. If you do go in, keep it to cardio only.' },
   sunday: { rest: true, title: 'Holiday', note: 'Sunday off. Enjoy it.' } };
-const WEEKDAY_ORDER = ['upperA', 'legs', 'upperB', 'legs2'];
-
+/* v4.1: a fixed pattern of day types. The four weekday training days run Lower, Upper, Cardio, Strength in that order
+   (the rest day is skipped); Saturday is Cardio and Sunday is off. Any day's type can be changed from the Log tab. */
+export const DAY_TYPES = [{ id: 'lower', label: 'Lower body' }, { id: 'upper', label: 'Upper body' }, { id: 'cardio', label: 'Cardio' }, { id: 'strength', label: 'Strength training' }];
+export const DAY_TYPE_LABEL = Object.fromEntries(DAY_TYPES.map(t => [t.id, t.label]));
+export const WEEKDAY_PATTERN = ['lower', 'upper', 'cardio', 'strength'];
+const SATURDAY_TYPE = 'cardio';
+/** Day type for a weekday (0 = Sun): one of DAY_TYPES ids, 'rest' or 'holiday'. restDow is the weekday rest day (1–5). */
+export function dayTypeFor(dow, restDow = 3) {
+  if (dow === 0) return 'holiday';
+  if (dow === 6) return SATURDAY_TYPE;
+  if (dow === restDow) return 'rest';
+  return WEEKDAY_PATTERN[[1, 2, 3, 4, 5].filter(d => d !== restDow).indexOf(dow)];
+}
+/** Session for a day type. week alternates the A/B versions of the upper and lower days for variety. */
+export function sessionForType(type, week = 0) {
+  const odd = Math.abs(week) % 2 === 1;
+  if (type === 'upper') return odd ? SESSIONS.upperB : SESSIONS.upperA;
+  if (type === 'lower') return odd ? SESSIONS.legs2 : SESSIONS.legs;
+  if (type === 'cardio') return SESSIONS.saturday;
+  if (type === 'strength') return SESSIONS.strength;
+  return type === 'holiday' ? SESSIONS.sunday : SESSIONS.rest;
+}
 /** Session for a weekday (0 = Sun). restDow is the weekday rest day (1–5). */
-export function planFor(dow, restDow = 3) {
+export function planFor(dow, restDow = 3, week = 0) { return sessionForType(dayTypeFor(dow, restDow), week); }
+/** The weekly plan before v4.1 (Upper A, Legs, Upper B, Legs, Saturday cardio). Only used to name older saved days. */
+export function legacyPlanFor(dow, restDow = 3) {
   if (dow === 0) return SESSIONS.sunday;
-  if (dow === 6) return SESSIONS.saturday;
+  if (dow === 6) return { title: 'Cardio intervals + core' };
   if (dow === restDow) return SESSIONS.rest;
-  const training = [1, 2, 3, 4, 5].filter(d => d !== restDow);
-  return SESSIONS[WEEKDAY_ORDER[training.indexOf(dow)]];
+  return SESSIONS[['upperA', 'legs', 'upperB', 'legs2'][[1, 2, 3, 4, 5].filter(d => d !== restDow).indexOf(dow)]];
+}
+/** Which exercises belong on a day type, for the "Other exercises" list. Lifting days keep cardio for the finish. */
+const UPPER_M = ['Chest', 'Back', 'Shoulders', 'Arms'];
+export function fitsDayType(m, type) {
+  if (!m || !DAY_TYPE_LABEL[type]) return true;
+  if (m.g === 'cardio') return true;
+  if (type === 'cardio') return false;
+  if (type === 'strength') return true;
+  const mus = m.m || [];
+  if (type === 'upper') return m.g === 'upper' || (m.g !== 'lower' && m.g !== 'core' && mus.some(x => UPPER_M.includes(x)) && !mus.includes('Legs'));
+  return m.g === 'lower' || m.g === 'core' || mus.includes('Legs') || (m.g === 'func' && mus.every(x => x === 'Core' || x === 'Cardio')); // lower body + core
 }
 
 export const DAYNAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -232,7 +267,7 @@ export const MOODS = [
   { id: 'light', label: 'Light', sets: 2, reps: '15', rest: '45 s', liftMin: 4, coreMin: 3, cardio: 20, freeAdd: 2, loadPct: 0.6, met: 3.5, cardioMet: 4.0,
     note: 'Same moves at about 60% of your usual weight, fewer sets, then 20 min easy cardio. Good for a tired or busy day.' },
   { id: 'cardio', label: 'Only cardio', cardioFocus: true, coreMin: 4, met: 2.8, cardioMet: 5.0,
-    note: 'Low-impact cardio with a short core finish. No weights today.' }];
+    note: 'Low-impact cardio machines only. No weights or mat work today.' }];
 export const MOOD_BY = Object.fromEntries(MOODS.map(m => [m.id, m]));
 
 /** Pain or trouble areas FitHit asks about. */
@@ -306,7 +341,8 @@ export const CARDIO_ORDER = ['recumbent_bike', 'cross_trainer', 'upright_bike', 
 export const FREE_ADD = {
   upper: ['db_incline_row', 'db_floor_press', 'landmine_press', 'db_reverse_fly', 'face_pull', 'zottman_curl', 'db_skull', 'db_shrug'],
   lower: ['goblet_squat', 'kb_swing', 'db_reverse_lunge', 'db_step_up', 'glute_bridge'],
-  full: ['goblet_squat', 'db_incline_row', 'db_floor_press', 'kb_swing', 'db_reverse_fly', 'landmine_press'] };
+  full: ['goblet_squat', 'db_incline_row', 'db_floor_press', 'kb_swing', 'db_reverse_fly', 'landmine_press'],
+  strength: ['kb_swing', 'db_reverse_fly', 'landmine_press', 'db_reverse_lunge', 'face_pull', 'db_step_up'] };
 /** Base for heavy or light on a day without a weights session (Saturday, rest day, Sunday). */
 export const FULL_BODY = ['leg_press', 'chest_press', 'lat_pulldown', 'glute_bridge', 'dead_bug', 'bird_dog'];
 export const CARDIO_CORE = ['dead_bug', 'bird_dog', 'side_plank'];

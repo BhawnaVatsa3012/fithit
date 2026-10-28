@@ -1,5 +1,5 @@
 // Screens. Each function returns HTML for one part of the app; no saving or event handling here.
-import { GROUPS, GROUP_LABEL, MACHINES, BY_ID, CUES, PAIN_RULE, planFor, DAYNAMES, MUSCLES, DOW, MEALS, FOODS, FOOD_BY, RANK, RANK_WHY, GUIDE, demoLinks, CIRCUIT, PROGRESSION, MOODS, MOOD_BY, TROUBLES, TROUBLE_LABEL, RED_FLAGS } from './catalogue.js';
+import { GROUPS, GROUP_LABEL, MACHINES, BY_ID, CUES, PAIN_RULE, DAYNAMES, MUSCLES, DOW, MEALS, FOODS, FOOD_BY, RANK, RANK_WHY, GUIDE, demoLinks, CIRCUIT, PROGRESSION, MOODS, MOOD_BY, TROUBLES, TROUBLE_LABEL, RED_FLAGS, DAY_TYPES, DAY_TYPE_LABEL, dayTypeFor, sessionForType, fitsDayType, legacyPlanFor } from './catalogue.js';
 import { keyOf, parseKey, addDays, mondayOf, daysBetween, has, isGymDay, kcalBurned, exerciseCount, mealTotals, dayTotals, servings, lastLoad, checkins, weeklyPace, latestWhr, strengthSummary, pad, buildPlan, clock, foodMeasure, amountTotals, buildRoutine, bmiOf, whrLimitFor, suggestLoad, estimateKcal } from './model.js';
 import { S, auth, ui, today, draftFor, isDirty, viewOf, proteinGoal, mealTarget } from './state.js';
 
@@ -95,11 +95,27 @@ export function bodyNow() {
 }
 /** Pain is asked once a day, the first time a mood is picked: one tap if nothing changed. */
 export const painCheckedToday = () => S.settings.troublesAsked && S.settings.troublesAt === today();
-/** Today's programme: the routine if a mood is picked (and pain areas answered), else the weekday session. */
+/** Weeks since a fixed Monday, to alternate the A/B upper and lower days. */
+const weekNo = k => Math.floor(daysBetween('2026-01-05', k) / 7);
+/** The day's type: Only cardio wins, then a type you picked (today's choice, or the one saved with the day), then the weekly pattern. */
+export function dayTypeOf(k) {
+  const d = viewOf(k) || {}, pattern = dayTypeFor(parseKey(k).getDay(), S.settings.restDow);
+  if (moodFor(k) === 'cardio') return { type: 'cardio', pattern };
+  const picked = (k === today() && ui.dtype) || d.dtype;
+  return { type: DAY_TYPE_LABEL[picked] ? picked : pattern, pattern };
+}
+/** Today's programme: the routine if a mood is picked (and pain areas answered), else the session for the day type. */
 export function programmeFor(k) {
-  const p = planFor(parseKey(k).getDay(), S.settings.restDow), mood = moodFor(k);
+  const { type, pattern } = dayTypeOf(k), p = sessionForType(type, weekNo(k)), mood = moodFor(k);
   const routine = mood && painCheckedToday() ? buildRoutine({ mood, troubles: S.settings.troubles || [], sharp: S.settings.troubleSharp || [], session: p, bmi: bodyNow().bmi, seed: daysBetween('2026-01-01', k) }) : null;
-  return { p, mood, routine, ids: routine ? routine.items : (p.items || []) };
+  return { p, mood, routine, type, pattern, ids: routine ? routine.items : (p.items || []) };
+}
+/** Dropdown to change the day's focus; the exercises below follow it. */
+function dayTypePicker(P) {
+  const opts = (DAY_TYPE_LABEL[P.pattern] ? [] : [[P.pattern, P.pattern === 'holiday' ? 'Holiday (no workout)' : 'Rest day (no workout)']]).concat(DAY_TYPES.map(t => [t.id, t.label + (t.id === P.pattern ? ' (usual for today)' : '')]));
+  return '<label class="dtype"><span class="kick">Today\u2019s focus</span><select class="inp v sel" data-dtype="1" aria-label="Focus for this day">' +
+    opts.map(o => '<option value="' + o[0] + '"' + (o[0] === P.type ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select></label>' +
+    (P.type !== P.pattern ? '<p class="cue" style="margin-top:6px">Changed from your usual ' + esc((DAY_TYPE_LABEL[P.pattern] || 'rest day').toLowerCase()) + (P.mood === 'cardio' ? ' because you picked Only cardio' : '') + '. <button class="lnk" data-act="dtypereset">Back to usual</button></p>' : '');
 }
 const MIN_CHOICES = [30, 45, 60, 75, 90, 120], MIN_LABEL = { 30: '30 min', 45: '45 min', 60: '1 hr', 75: '1\u00bc hr', 90: '1\u00bd hr', 120: '2 hr' };
 const SEX_LABEL = { f: 'Female', m: 'Male' };
@@ -213,8 +229,8 @@ export function logView(D) {
   const extra = d.machines.some(id => !ids.includes(id)) || Object.keys(d.cardio).some(id => !ids.includes(id));
   const open = ui.othersOpen !== null ? ui.othersOpen : (!ids.length || extra);
   const gymOn = isGymDay(d);
-  let h = '<section class="card sess"><div class="kick">' + DAYNAMES[dow] + (r ? ' \u00b7 Today\u2019s routine' : p.rest ? ' \u00b7 Recovery' : ' \u00b7 Session') + '</div><h1>' + esc(r ? MOOD_BY[r.mood].label + (r.mood !== 'cardio' && !p.rest && p.focus !== 'full' ? ': ' + p.title : '') : p.title) + '</h1>';
-  if (r && r.mood !== 'cardio') { const M = MOOD_BY[r.mood]; h += '<div class="rx tight"><div><b class="num">' + M.sets + '</b><span>Sets</span></div><div><b class="num">' + M.reps + '</b><span>Reps</span></div><div><b class="num">' + M.rest.replace(' s', '') + '</b><span>Rest (s)</span></div><div><b class="num">' + r.session.cardio + '</b><span>Cardio min</span></div></div>'; }
+  let h = '<section class="card sess"><div class="kick">' + DAYNAMES[dow] + (r ? ' \u00b7 Today\u2019s routine' : p.rest ? ' \u00b7 Recovery' : ' \u00b7 Session') + '</div><h1>' + esc(r ? (r.mood === 'cardio' ? 'Only cardio' : MOOD_BY[r.mood].label + (!p.rest ? ': ' + p.title : '')) : p.title) + '</h1>' + dayTypePicker(P);
+  if (r && !r.session.cardioFocus) { const M = MOOD_BY[r.mood]; h += '<div class="rx tight"><div><b class="num">' + M.sets + '</b><span>Sets</span></div><div><b class="num">' + M.reps + '</b><span>Reps</span></div><div><b class="num">' + M.rest.replace(' s', '') + '</b><span>Rest (s)</span></div><div><b class="num">' + r.session.cardio + '</b><span>Cardio min</span></div></div>'; }
   else if (p.rx && !r) h += '<div class="rx">' + p.rx.map(r => '<div><b class="num' + (String(r.value).length >= 5 ? ' long' : '') + '">' + r.value + '</b><span>' + r.label + '</span></div>').join('') + '</div>';
   h += '<p class="note">' + esc(r ? 'Built from how you feel, your pain areas and your body. Your usual ' + p.title.toLowerCase() + ' plan returns when you clear the mood.' : p.note) + '</p>';
   if (ids.length) h += '<div class="prog"><div class="prog-h"><span class="kick">Session progress</span><span class="big num" aria-label="' + done + ' of ' + items.length + ' done"><span class="v">' + done + '</span>/' + items.length + '</span></div><div class="segs" aria-hidden="true">' +
@@ -222,10 +238,11 @@ export function logView(D) {
   h += '</section><div class="pad"><button class="gym' + (gymOn ? ' on' : '') + '" data-act="gym" aria-pressed="' + gymOn + '"><span style="color:var(--volt);display:grid">' + svg(I.dumbbell, 22) + '</span>' +
     '<span class="grow"><span class="gym-t">Went to the gym</span><span class="sub">' + (gymOn ? 'Counts toward your week' : 'Tick even if you only did a few machines') + '</span></span>' + (gymOn ? CHECK : BOX) + '</button>' + (gymOn ? kneeBlock(d) : '') + '</div>';
   if ((!p.rest && ids.length) || ui.selected === D.TODAY) h += planCard(P, plan);
-  if (ids.length) h += '<section class="sec"><div class="sec-h"><h2>Programme</h2><span class="cap">Tap to tick off, then log the weight</span></div><p class="cue" style="margin:-6px 0 14px">' + (src.cardioFocus ? 'Cardio first, then core on the mat.' : 'In this order: big moves \u2192 smaller muscles \u2192 arms \u2192 core \u2192 cardio.') + ' Tap <b>How to do it</b> on any exercise.</p><div class="list">' + items.map(x => itemRow(x.m, x.cue, x.num, d)).join('') + '</div></section>';
-  const groups = GROUPS.map(g => ({ g, items: MACHINES.filter(m => m.g === g.id && !ids.includes(m.id)) })).filter(x => x.items.length);
+  if (ids.length) h += '<section class="sec"><div class="sec-h"><h2>Programme</h2><span class="cap">Tap to tick off, then log the weight</span></div><p class="cue" style="margin:-6px 0 14px">' + (src.cardioFocus ? (P.type === 'cardio' ? 'Cardio machines only today. Pick one, or split the time between them.' : 'Cardio first, then core on the mat.') : 'In this order: big moves \u2192 smaller muscles \u2192 arms \u2192 core \u2192 cardio.') + ' Tap <b>How to do it</b> on any exercise.</p><div class="list">' + items.map(x => itemRow(x.m, x.cue, x.num, d)).join('') + '</div></section>';
+  // Only exercises that belong to the day's focus: a Cardio day lists cardio machines only, an Upper day upper-body moves.
+  const groups = GROUPS.map(g => ({ g, items: MACHINES.filter(m => m.g === g.id && !ids.includes(m.id) && (fitsDayType(m, P.type) || isOn(m))) })).filter(x => x.items.length);
   const total = groups.reduce((a, x) => a + x.items.length, 0);
-  h += '<section class="pad" style="margin-top:32px"><button class="disc" data-act="others" aria-expanded="' + !!open + '"><span class="t">' + (ids.length ? 'Other exercises' : 'All exercises') + '</span><span class="cap">' + total + ' available</span><span class="chev">' + svg(I.down, 18) + '</span></button>';
+  h += '<section class="pad" style="margin-top:32px"><button class="disc" data-act="others" aria-expanded="' + !!open + '"><span class="t">' + (ids.length ? (DAY_TYPE_LABEL[P.type] ? 'More ' + DAY_TYPE_LABEL[P.type].toLowerCase() + ' exercises' : 'Other exercises') : 'All exercises') + '</span><span class="cap">' + total + ' available</span><span class="chev">' + svg(I.down, 18) + '</span></button>';
   if (open) h += groups.map(x => '<div class="grp"><div class="kick v">' + x.g.label + '</div>' + (x.g.hint ? '<div class="cap" style="margin-top:2px">' + x.g.hint + '</div>' : '') +
     '<div class="list">' + x.items.map(m => itemRow(m, CUES[m.id] || '', '', d)).join('') + '</div></div>').join('');
   return h + '</section>' + customExercises(d);
@@ -427,7 +444,7 @@ export function calendarView(D) {
     '<div class="leg"><span><span class="sq" style="background:var(--volt)"></span>Gym day</span><span><span class="sq" style="border:1.5px solid var(--tx)"></span>Today</span><span><span class="sq" style="width:7px;height:7px;border-radius:50%;background:var(--ember)"></span>Protein goal met</span><span>Tap a day to edit it</span></div></div></section>';
   const recent = Object.keys(E).filter(k => k <= D.TODAY && isGymDay(E[k])).sort().reverse().slice(0, 6);
   h += '<section class="sec"><h2 class="h2" style="margin-bottom:10px">Recent sessions</h2>' + (recent.length ? '' : '<p class="empty">No sessions logged yet. Tick today\u2019s machines on the Log tab and tap Save day.</p>') + '<div class="list">' +
-    recent.map(k => { const e = E[k], cc = exerciseCount(e), kk = kcalBurned(e), dd = parseKey(k), pp = planFor(dd.getDay(), S.settings.restDow);
+    recent.map(k => { const e = E[k], cc = exerciseCount(e), kk = kcalBurned(e), dd = parseKey(k), pp = e.dtype ? { title: e.mood === 'cardio' ? 'Only cardio' : DAY_TYPE_LABEL[e.dtype] } : legacyPlanFor(dd.getDay(), S.settings.restDow);
       return '<button class="rs" data-day="' + k + '"><span class="rs-d"><b>' + dd.getDate() + '</b><span>' + dd.toLocaleDateString('en-GB', { weekday: 'short' }) + '</span></span><span class="grow"><b style="display:block;font-weight:600;font-size:15px">' + (pp.rest ? 'Extra session' : esc(pp.title)) + '</b><span class="cap">' + (cc ? plural(cc, 'exercise') : 'Checked in') + (kk ? ' \u00b7 ' + kk + ' kcal' : '') + (e.knee ? ' \u00b7 knee: ' + (e.knee === 2 ? 'stopped' : 'discomfort') : '') + '</span></span><span style="color:var(--mu);display:grid">' + svg(I.right, 18) + '</span></button>'; }).join('') + '</div></section>';
   return h;
 }

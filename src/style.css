@@ -259,3 +259,6 @@ input::-webkit-inner-spin-button{opacity:.3}
 .adj b{color:var(--tx);font-weight:600}.adj b.vt{color:var(--volt)}
 .chips button{padding:4px 6px;line-height:1.15}
 @media (max-width:380px){.nav button{font-size:9px;letter-spacing:.04em}.chips button{font-size:13px}}
+/* v4.1: today's focus dropdown */
+.dtype{display:grid;gap:6px;margin-top:14px}
+.dtype .sel{min-height:44px;font-weight:700;font-size:15px}
