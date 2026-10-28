@@ -1,5 +1,5 @@
 // Screens. Each function returns HTML for one part of the app; no saving or event handling here.
-import { GROUPS, GROUP_LABEL, MACHINES, BY_ID, CUES, PAIN_RULE, planFor, DAYNAMES, MUSCLES, DOW, MEALS, FOODS, FOOD_BY, RANK, RANK_WHY, GUIDE, demoLinks, CIRCUIT, PROGRESSION, MOODS, MOOD_BY, TROUBLES, TROUBLE_LABEL } from './catalogue.js';
+import { GROUPS, GROUP_LABEL, MACHINES, BY_ID, CUES, PAIN_RULE, planFor, DAYNAMES, MUSCLES, DOW, MEALS, FOODS, FOOD_BY, RANK, RANK_WHY, GUIDE, demoLinks, CIRCUIT, PROGRESSION, MOODS, MOOD_BY, TROUBLES, TROUBLE_LABEL, RED_FLAGS } from './catalogue.js';
 import { keyOf, parseKey, addDays, mondayOf, daysBetween, has, isGymDay, kcalBurned, exerciseCount, mealTotals, dayTotals, servings, lastLoad, checkins, weeklyPace, latestWhr, strengthSummary, pad, buildPlan, clock, foodMeasure, amountTotals, buildRoutine, bmiOf, whrLimitFor, suggestLoad, estimateKcal } from './model.js';
 import { S, auth, ui, today, draftFor, isDirty, viewOf, proteinGoal, mealTarget } from './state.js';
 
@@ -89,34 +89,43 @@ export function guidePanel(m) {
 export const moodFor = k => (k === today() ? ui.mood : null);
 const lastWeigh = () => { const w = [...checkins(S.entries)].reverse().find(c => c.weight != null); return w || null; };
 export function bodyNow() {
-  const st = S.settings, lw = lastWeigh(), kg = st.weightKg || (lw ? lw.weight : null);
-  return { kg, fromWeigh: !st.weightKg && lw ? lw.key : null, bmi: bmiOf(st.heightCm, kg) };
+  // Whichever is newer: the weight typed under About you, or the latest weigh-in on the Progress tab.
+  const st = S.settings, lw = lastWeigh(), useSet = st.weightKg && (!lw || (st.weightAt && st.weightAt >= lw.key)), kg = useSet ? st.weightKg : (lw ? lw.weight : st.weightKg || null);
+  return { kg, fromWeigh: !useSet && lw ? lw.key : null, bmi: bmiOf(st.heightCm, kg) };
 }
+/** Pain is asked once a day, the first time a mood is picked: one tap if nothing changed. */
+export const painCheckedToday = () => S.settings.troublesAsked && S.settings.troublesAt === today();
 /** Today's programme: the routine if a mood is picked (and pain areas answered), else the weekday session. */
 export function programmeFor(k) {
   const p = planFor(parseKey(k).getDay(), S.settings.restDow), mood = moodFor(k);
-  const routine = mood && S.settings.troublesAsked ? buildRoutine({ mood, troubles: S.settings.troubles || [], session: p, bmi: bodyNow().bmi, seed: daysBetween('2026-01-01', k) }) : null;
+  const routine = mood && painCheckedToday() ? buildRoutine({ mood, troubles: S.settings.troubles || [], sharp: S.settings.troubleSharp || [], session: p, bmi: bodyNow().bmi, seed: daysBetween('2026-01-01', k) }) : null;
   return { p, mood, routine, ids: routine ? routine.items : (p.items || []) };
 }
 const MIN_CHOICES = [30, 45, 60, 75, 90, 120], MIN_LABEL = { 30: '30 min', 45: '45 min', 60: '1 hr', 75: '1\u00bc hr', 90: '1\u00bd hr', 120: '2 hr' };
 const SEX_LABEL = { f: 'Female', m: 'Male' };
 function aboutForm(first) {
-  const a = ui.ab || {}, lw = lastWeigh(), tr = a.troubles || [];
+  const a = ui.ab || {}, lw = lastWeigh(), tr = a.troubles || [], sh = a.sharp || [], st = S.settings, recheck = first && st.troublesAsked, prev = st.troubles || [];
   const n = (k, label, unit, ph, min, max, step) => '<label class="bf"><span>' + label + '</span><span class="bfi"><input class="inp v sm num" type="number" inputmode="decimal" min="' + min + '" max="' + max + '" step="' + step + '" placeholder="' + ph + '" data-ab="' + k + '" value="' + val(a[k]) + '"><span class="unit">' + unit + '</span></span></label>';
-  return '<div class="about">' + (first ? '<div class="kick v">Before FitHit builds it</div><p class="ab-q">Any pain or trouble today?</p><p class="cue">Tap every area that hurts or is healing. FitHit swaps or skips the moves that load it and tells you why.</p>'
-      : '<div class="kick v">About you</div><p class="cue" style="margin-top:4px">Pain or trouble areas</p>') +
-    '<div class="tchips" role="group" aria-label="Pain or trouble areas">' + TROUBLES.map(t => '<button aria-pressed="' + tr.includes(t.id) + '" data-tr="' + t.id + '">' + esc(t.label) + '</button>').join('') + '</div>' +
-    '<div class="bgrid" style="margin-top:14px">' + n('heightCm', 'Height', 'cm', '160', 120, 230, 1) + n('weightKg', 'Weight', 'kg', lw ? fmt(lw.weight, 1) : '70', 30, 250, 0.1) + '</div>' +
+  const chip = t => { const on = tr.includes(t.id), sharp = sh.includes(t.id);
+    return '<button class="' + (sharp ? 'sharp' : '') + '" aria-pressed="' + on + '" data-tr="' + t.id + '" aria-label="' + esc(t.label) + ': ' + (sharp ? 'sharp pain today' : on ? 'niggle or healing' : 'no trouble') + '">' + esc(t.label) + (sharp ? ' \u00b7 sharp' : '') + '</button>'; };
+  let h = '<div class="about">' + (first ? '<div class="kick v">Before FitHit builds it</div><p class="ab-q">Any pain or trouble today?</p>' +
+      (recheck ? '<p class="cue">Last check (' + (st.troublesAt ? shortDate(st.troublesAt) : 'earlier') + '): <b class="vt">' + esc(prev.length ? prev.map(t => TROUBLE_LABEL[t] + ((st.troubleSharp || []).includes(t) ? ' (sharp)' : '')).join(', ') : 'no trouble') + '</b>.</p><button class="save full" style="margin-top:12px" data-act="trsame"' + (ui.savingSettings ? ' disabled' : '') + '>' + (ui.savingSettings ? 'Saving\u2026' : 'Same as last time') + '</button><p class="cue" style="margin-top:14px">Or change it:</p>' : '')
+    : '<div class="kick v">About you</div><p class="cue" style="margin-top:4px">Pain or trouble areas</p>') +
+    '<p class="cue">Tap once for a niggle or healing area, twice for sharp pain today, a third time to clear. FitHit swaps or skips moves that load it, and rests the whole area if it\u2019s sharp.</p>' +
+    '<div class="tchips" role="group" aria-label="Pain or trouble areas">' + TROUBLES.map(chip).join('') + '</div>' +
+    '<p class="msg err" style="font-size:12.5px">' + esc(RED_FLAGS) + '</p>';
+  if (!first || !st.troublesAsked) h += '<div class="bgrid" style="margin-top:14px">' + n('heightCm', 'Height', 'cm', '160', 120, 230, 1) + n('weightKg', 'Weight', 'kg', lw ? fmt(lw.weight, 1) : '70', 30, 250, 0.1) + '</div>' +
     '<label class="bf" style="margin-top:12px"><span>Gender</span><select class="inp v sel" data-ab="sex"><option value="">Prefer not to say</option><option value="f"' + (a.sex === 'f' ? ' selected' : '') + '>Female</option><option value="m"' + (a.sex === 'm' ? ' selected' : '') + '>Male</option></select></label>' +
-    '<p class="fine">Height and weight give your BMI, which steers the cardio choice, and your calorie estimate. Gender sets your waist-to-hip health line (0.85 women, 0.90 men).' + (lw ? ' Leave weight blank to use your latest weigh-in (' + fmt(lw.weight, 1) + ' kg, ' + shortDate(lw.key) + ').' : '') + '</p>' +
-    '<div class="ab-b">' + (first ? '<button class="clr" data-act="trnone">No trouble</button>' : '<button class="clr" data-act="about">Cancel</button>') + '<button class="save" data-act="saveabout">' + (first ? 'Build my routine' : 'Save') + '</button></div></div>';
+    '<p class="fine">Height and weight give your BMI, which steers the cardio choice, and your calorie estimate. Gender sets your waist-to-hip health line (0.85 women, 0.90 men).' + (lw ? ' Leave weight blank to use your weigh-ins; FitHit always uses whichever weight is newer.' : '') + '</p>';
+  h += '<p class="fine">Pain areas and body details stay private in your account, like your targets. Export and Delete in Targets & settings include them.</p>';
+  return h + '<div class="ab-b">' + (first ? (recheck ? '' : '<button class="clr" data-act="trnone"' + (ui.savingSettings ? ' disabled' : '') + '>No trouble</button>') : '<button class="clr" data-act="about">Cancel</button>') + '<button class="save" data-act="saveabout"' + (ui.savingSettings ? ' disabled' : '') + '>' + (ui.savingSettings ? 'Saving\u2026' : first ? 'Build my routine' : 'Save') + '</button></div></div>';
 }
 function aboutSummary() {
   const st = S.settings, b = bodyNow(), tr = st.troubles || [], parts = [];
   if (st.heightCm) parts.push(st.heightCm + ' cm'); if (b.kg) parts.push(fmt(b.kg, 1) + ' kg' + (b.fromWeigh ? ' (weigh-in ' + shortDate(b.fromWeigh) + ')' : ''));
   if (b.bmi) parts.push('BMI ' + fmt(b.bmi.v, 1)); if (st.sex) parts.push(SEX_LABEL[st.sex]);
   return '<div class="absum"><span class="grow"><span class="cue">' + (parts.length ? esc(parts.join(' \u00b7 ')) : 'Add height and weight for your BMI and calorie estimate.') + '</span>' +
-    '<span class="cue">' + (tr.length ? 'Pain areas: <b class="vt">' + esc(tr.map(t => TROUBLE_LABEL[t]).join(', ')) + '</b>' : 'No pain areas') + '</span></span><button class="lnk" data-act="about">Change</button></div>';
+    '<span class="cue">' + (tr.length ? 'Pain today: <b class="vt">' + esc(tr.map(t => TROUBLE_LABEL[t] + ((st.troubleSharp || []).includes(t) ? ' (sharp)' : '')).join(', ')) + '</b>' : 'No pain today') + '</span></span><button class="lnk" data-act="about">Change</button></div>';
 }
 function bmiLine(bmi) {
   if (!bmi) return '';
@@ -127,13 +136,15 @@ function changesBlock(r) {
   if (!r.changes.length && !Object.keys(r.cues).length && !r.notes.length) return '';
   const nm = id => esc(BY_ID[id].name);
   let h = '<div class="adj"><div class="kick">Adjusted for you</div><ul>';
-  r.changes.forEach(c => { const area = esc(TROUBLE_LABEL[c.area].toLowerCase());
-    h += '<li>' + (c.to && !c.dup ? '<b>' + nm(c.from) + '</b> \u2192 <b class="vt">' + nm(c.to) + '</b>. Skipped for your ' + area + ': ' + esc(c.why) + '.'
+  const restedN = r.changes.filter(c => c.sharp).length;
+  r.changes.filter(c => !c.sharp || restedN <= 3).forEach(c => { const area = esc(TROUBLE_LABEL[c.area].toLowerCase());
+    h += '<li>' + (c.sharp ? '<b>Rest ' + nm(c.from) + '</b>: ' + esc(c.why) + '.' : c.to && !c.dup ? '<b>' + nm(c.from) + '</b> \u2192 <b class="vt">' + nm(c.to) + '</b>. Skipped for your ' + area + ': ' + esc(c.why) + '.'
       : '<b>Skip ' + nm(c.from) + '</b> for your ' + area + ': ' + esc(c.why) + '.' + (c.to ? ' ' + nm(c.to) + ' is already in your plan.' : '')) + '</li>'; });
+  if (restedN > 3) h += '<li><b>' + plural(restedN, 'exercise') + ' rested</b> for sharp pain today.</li>';
   const modded = Object.keys(r.cues).filter(id => !r.changes.some(c => c.to === id));
   if (modded.length) h += '<li>' + plural(modded.length, 'move') + ' changed to protect ' + esc((S.settings.troubles || []).map(t => TROUBLE_LABEL[t].toLowerCase()).join(' and ')) + ': see the cue under each one.</li>';
   r.notes.forEach(x => { h += '<li>' + esc(x) + '</li>'; });
-  return h + '</ul><p class="fine">If anything hurts sharply, stop that move. For pain that keeps coming back, see a physiotherapist or doctor.</p></div>';
+  return h + '</ul><p class="fine">If anything hurts sharply, stop that move. For pain that keeps coming back, see a physiotherapist. ' + esc(RED_FLAGS) + '</p></div>';
 }
 /* ---------- (a, b) plan the session to the time you have ---------- */
 function planCard(P, plan) {
@@ -144,7 +155,7 @@ function planCard(P, plan) {
     if (M) h += '<p class="cue" style="margin-top:8px">' + esc(M.note) + (p.rest && mood === 'heavy' ? ' It\u2019s your rest day, so Light or Only cardio is the kinder choice.' : '') + '</p>';
   }
   h += '<p class="cue" style="margin-top:14px">How long can you stay?</p><div class="chips" role="radiogroup" aria-label="Minutes at the gym today">' + MIN_CHOICES.map(n => '<button role="radio" aria-checked="' + (ui.mins === n) + '" data-mins="' + n + '">' + MIN_LABEL[n] + '</button>').join('') + '</div>';
-  if (mood && !S.settings.troublesAsked) return h + aboutForm(true) + '</div></section>';
+  if (mood && !painCheckedToday()) return h + aboutForm(true) + '</div></section>';
   if (mood) h += ui.aboutOpen ? aboutForm(false) : aboutSummary();
   if (r) h += changesBlock(r) + bmiLine(bodyNow().bmi);
   if (!plan) return h + (mood && !ui.mins ? '' : '') + '</div></section>';
@@ -158,8 +169,9 @@ function planCard(P, plan) {
   plan.steps.forEach((s, i) => { const m = BY_ID[s.id], why = s.rank !== lastRank && !src.cardioFocus ? ' \u00b7 ' + RANK_WHY[s.rank] : ''; lastRank = s.rank;
     const sets = m.g === 'core' ? '2\u20133 rounds' : M ? M.sets + ' sets \u00d7 ' + M.reps + ', ' + M.rest + ' rest' : PROGRESSION.sets + ' sets \u00d7 ' + PROGRESSION.repBottom + '\u2013' + PROGRESSION.repTop + ', 60 s rest';
     const sug = m.load === true ? suggestLoad(lastLoad(S.entries, s.id, ui.selected), mood) : null;
+    const warmSet = mood === 'heavy' && i === 0 && m.load === true ? ' \u00b7 Start with 1 warm-up set: about half the weight, 10 easy reps' : '';
     const pain = r && r.cues[s.id] ? ' \u00b7 <span class="vt">' + esc(r.cues[s.id]) + '</span>' : '';
-    h += row(s.start, pad(i + 1), m.name + ' \u00b7 ' + s.dur + ' min', esc(sets) + (sug ? ' \u00b7 ' + (mood === 'light' ? 'light: ' : 'today: ') + fmt(sug.kg, 1) + ' kg' : '') + pain + esc(why)); });
+    h += row(s.start, pad(i + 1), m.name + ' \u00b7 ' + s.dur + ' min', esc(sets) + (sug ? ' \u00b7 ' + (mood === 'light' ? 'light: ' : 'today: ') + fmt(sug.kg, 1) + ' kg' : '') + pain + esc(warmSet + why)); });
   if (!src.cardioFocus) h += cardioRow();
   h += row(plan.coolStart, '', 'Stretch \u00b7 ' + plan.cool + ' min', 'Chest, upper back, calves and hamstrings, 20\u201330 s each. See Guide.') + '</ol>';
   if (plan.skipped.length) h += '<p class="msg">Left out to fit ' + plan.mins + ' min: ' + esc(plan.skipped.map(id => BY_ID[id].name).join(', ')) + '. Do them first next time, or on a longer day.</p>';
@@ -202,8 +214,8 @@ export function logView(D) {
   const open = ui.othersOpen !== null ? ui.othersOpen : (!ids.length || extra);
   const gymOn = isGymDay(d);
   let h = '<section class="card sess"><div class="kick">' + DAYNAMES[dow] + (r ? ' \u00b7 Today\u2019s routine' : p.rest ? ' \u00b7 Recovery' : ' \u00b7 Session') + '</div><h1>' + esc(r ? MOOD_BY[r.mood].label + (r.mood !== 'cardio' && !p.rest && p.focus !== 'full' ? ': ' + p.title : '') : p.title) + '</h1>';
-  if (r && r.mood !== 'cardio') { const M = MOOD_BY[r.mood]; h += '<div class="rx"><div><b class="num">' + M.sets + '</b><span>Sets</span></div><div><b class="num">' + M.reps + '</b><span>Reps</span></div><div><b class="num">' + M.rest.replace(' s', '') + '</b><span>Rest (s)</span></div><div><b class="num">' + r.session.cardio + '</b><span>Cardio min</span></div></div>'; }
-  else if (p.rx && !r) h += '<div class="rx">' + p.rx.map(r => '<div><b class="num">' + r.value + '</b><span>' + r.label + '</span></div>').join('') + '</div>';
+  if (r && r.mood !== 'cardio') { const M = MOOD_BY[r.mood]; h += '<div class="rx tight"><div><b class="num">' + M.sets + '</b><span>Sets</span></div><div><b class="num">' + M.reps + '</b><span>Reps</span></div><div><b class="num">' + M.rest.replace(' s', '') + '</b><span>Rest (s)</span></div><div><b class="num">' + r.session.cardio + '</b><span>Cardio min</span></div></div>'; }
+  else if (p.rx && !r) h += '<div class="rx">' + p.rx.map(r => '<div><b class="num' + (String(r.value).length >= 5 ? ' long' : '') + '">' + r.value + '</b><span>' + r.label + '</span></div>').join('') + '</div>';
   h += '<p class="note">' + esc(r ? 'Built from how you feel, your pain areas and your body. Your usual ' + p.title.toLowerCase() + ' plan returns when you clear the mood.' : p.note) + '</p>';
   if (ids.length) h += '<div class="prog"><div class="prog-h"><span class="kick">Session progress</span><span class="big num" aria-label="' + done + ' of ' + items.length + ' done"><span class="v">' + done + '</span>/' + items.length + '</span></div><div class="segs" aria-hidden="true">' +
     items.map(x => '<span' + (isOn(x.m) ? ' class="on"' : '') + '></span>').join('') + '</div></div>';
@@ -395,7 +407,9 @@ export function progressView(D) {
     '<div class="ringc"><div class="ringn num">' + D.weekHits + '</div><div class="ringl">of ' + S.settings.sessionsGoal + ' sessions</div></div></div><div class="dl" aria-label="Days trained this week">' +
     D.week.map(w => '<span class="' + (w.hit ? 'h' : w.today ? 't' : '') + '">' + w.letter + '</span>').join('') + '</div></div>';
   const stats = [[D.weekKcal.toLocaleString('en-GB'), 'Cardio kcal this week'], [D.proteinDays + '/' + D.elapsed, 'Protein goal days'], [D.last ? ago(daysBetween(D.last, D.TODAY)) : 'None', 'Last gym visit']];
-  h += '<div class="stats">' + stats.map(s => '<div class="card"><b class="num">' + s[0] + '</b><span>' + s[1] + '</span></div>').join('') + '</div>' + kneeSummary(D) + '</section>';
+  const moods = {}; D.week.forEach(w => { const e = E[w.key]; if (e && e.mood && isGymDay(e)) moods[e.mood] = (moods[e.mood] || 0) + 1; });
+  const moodLine = MOODS.filter(m => moods[m.id]).map(m => moods[m.id] + ' ' + m.label.toLowerCase()).join(', ');
+  h += '<div class="stats">' + stats.map(s => '<div class="card"><b class="num">' + s[0] + '</b><span>' + s[1] + '</span></div>').join('') + '</div>' + (moodLine ? '<p class="msg">Routines this week: ' + esc(moodLine) + '.</p>' : '<p class="msg">Pick how you feel on the Log tab and FitHit builds today\u2019s routine; it shows up here once you save the day.</p>') + kneeSummary(D) + '</section>';
   h += bodyCard(D) + strengthCard(D);
   h += '<section class="sec"><div class="sec-h"><h2>Last trained</h2><span class="cap">Due after 7 days</span></div><div class="list">' +
     MUSCLES.map(mu => { const dn = lastT[mu] ? daysBetween(lastT[mu], D.TODAY) : null, due = dn === null || dn >= 7, f = dn === null ? 0 : Math.max(0, 1 - dn / 7);

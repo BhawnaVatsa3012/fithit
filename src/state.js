@@ -5,7 +5,7 @@ import { draftStore } from './store.js';
 import { DOW } from './catalogue.js';
 
 /* ---------------- state ---------------- */
-export const S = { entries: {}, meta: {}, settings: { ...DEFAULT_SETTINGS }, drafts: {}, saving: null, pending: new Set() };
+export const S = { entries: {}, meta: {}, settings: { ...DEFAULT_SETTINGS }, settingsBase: undefined, drafts: {}, saving: null, pending: new Set() }; // settingsBase undefined = not loaded from the server yet
 export const auth = { user: null, ready: false, loaded: false, member: null, email: '', sent: false, error: '', busy: false };
 export const today = () => keyOf(new Date());
 export const ui = { tab: 'log', selected: today(), othersOpen: null, meal: defaultMeal(), settingsOpen: false, sd: null,

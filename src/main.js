@@ -3,7 +3,7 @@ import { BY_ID, MEALS, DEFAULT_SETTINGS, TROUBLES } from './catalogue.js';
 import { keyOf, parseKey, addDays, has, clone, ensure, normalize, isEmpty, isGymDay, exerciseCount, lastLoad, suggestLoad, cleanText } from './model.js';
 import { sb, claim, loadAll, saveDay, loadSettings, saveSettings, exportAll, deleteAll, cache, draftStore, clearDevice } from './store.js';
 import { S, auth, ui, today, draftFor, isDirty, anyDirty, viewOf, persistDrafts, derive, rememberMins, rememberMood } from './state.js';
-import { header, switcher, logView, mealsSummary, mealTiles, proteinWeek, mealsView, saveBar, progressView, calendarView, navHtml, authView, guideView, calcResult, calcFoods, programmeFor, moodFor } from './views.js';
+import { header, switcher, logView, mealsSummary, mealTiles, proteinWeek, mealsView, saveBar, progressView, calendarView, navHtml, authView, guideView, calcResult, calcFoods, programmeFor, moodFor, painCheckedToday } from './views.js';
 
 /* ---------------- render ---------------- */
 function render() {
@@ -73,7 +73,7 @@ async function startSession(user) {
   const saved = draftStore.get(user.id); const restored = Object.keys(saved);
   restored.forEach(k => { S.drafts[k] = ensure(saved[k]); S.pending.add(k); });
   render();
-  try { S.settings = await loadSettings(); } catch (e) { /* settings table not there yet: keep defaults */ }
+  await reloadSettings();
   await refresh();
   S.pending.forEach(k => { if (!isDirty(k)) S.pending.delete(k); });
   if (S.pending.size) { toast('Restored unsaved changes from last time. Saving them now.', true); flushPending(); }
@@ -82,39 +82,55 @@ function setUser(user) {
   const wasReady = auth.ready, prev = auth.user ? auth.user.id : null, next = user ? user.id : null;
   auth.user = user || null; auth.ready = true;
   if (wasReady && prev === next) return;
-  S.drafts = {}; S.entries = {}; S.meta = {}; S.pending = new Set(); S.settings = { ...DEFAULT_SETTINGS }; auth.loaded = false; auth.member = null;
+  S.drafts = {}; S.entries = {}; S.meta = {}; S.pending = new Set(); S.settings = { ...DEFAULT_SETTINGS }; S.settingsBase = undefined; auth.loaded = false; auth.member = null;
   if (user) startSession(user); else render();
 }
 
 /* ---------------- settings & data ---------------- */
+async function reloadSettings() {
+  try { const r = await Promise.race([loadSettings(), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 4000))]); S.settings = r.settings; S.settingsBase = r.base; cache.set(auth.user.id, S.entries, S.meta, S.settings); return true; }
+  catch { return false; } // offline: keep the on-device copy, but don't allow saving over the server version
+}
+/** One safe path for every settings save: never before the server copy has loaded, and never over a newer version. */
+async function commitSettings(next) {
+  if (ui.savingSettings) return false; ui.savingSettings = true; rerender();
+  try { return await commitSettingsNow(next); } finally { ui.savingSettings = false; rerender(); }
+}
+async function commitSettingsNow(next) {
+  if (S.settingsBase === undefined && !(await reloadSettings())) { toast('Can\u2019t reach your saved settings yet, so nothing was changed. Try again when you\u2019re online.', true); return false; }
+  const r = await saveSettings(auth.user.id, next, S.settingsBase);
+  if (r.conflict) { await reloadSettings(); rerender(); toast('Your settings changed on another device. FitHit loaded the latest: check and save again.', true); return false; }
+  if (r.error) { toast('Couldn\u2019t save: ' + (r.error.message || 'unknown error') + '. Nothing was changed.', true); return false; }
+  S.settings = next; S.settingsBase = r.base; cache.set(auth.user.id, S.entries, S.meta, S.settings); return true;
+}
 async function doSaveSettings() {
   const s = { ...S.settings, ...ui.sd }, out = {};
   const numF = { proteinGoal: [40, 200], kcalTarget: [1000, 4000], startWeight: [30, 250], targetWeight: [30, 250], vfGoal: [1, 20], sessionsGoal: [1, 7], restDow: [1, 5] };
   for (const k of Object.keys(numF)) { const v = s[k]; if (v === '' || v == null) { out[k] = DEFAULT_SETTINGS[k]; continue; } const n = Number(v); if (!isFinite(n) || n < numF[k][0] || n > numF[k][1]) { toast('Check ' + k.replace(/([A-Z])/g, ' $1').toLowerCase() + ': it should be between ' + numF[k][0] + ' and ' + numF[k][1] + '.', true); return; } out[k] = Math.round(n * 10) / 10; }
   out.lastInbody = s.lastInbody && /^\d{4}-\d\d-\d\d$/.test(s.lastInbody) && s.lastInbody <= today() ? s.lastInbody : null;
-  const next = { ...S.settings, ...out }, r = await saveSettings(auth.user.id, next);
-  if (r.error) { toast('Couldn\u2019t save settings: ' + r.error.message, true); return; }
-  S.settings = next; ui.sd = null; cache.set(auth.user.id, S.entries, S.meta, S.settings); rerender(); toast('Settings saved');
+  if (!(await commitSettings({ ...S.settings, ...out }))) return;
+  ui.sd = null; rerender(); toast('Settings saved');
 }
 /* ---------- About you: height, weight, gender, pain areas (v4) ---------- */
-function openAbout() { const st = S.settings; ui.ab = { heightCm: st.heightCm ?? '', weightKg: st.weightKg ?? '', sex: st.sex || '', troubles: [...(st.troubles || [])] }; }
+function openAbout() { const st = S.settings; ui.ab = { heightCm: st.heightCm ?? '', weightKg: st.weightKg ?? '', sex: st.sex || '', troubles: [...(st.troubles || [])], sharp: [...(st.troubleSharp || [])] }; }
+/** Today's mood is saved with today's workout, so Recent sessions show which routine you did. */
+function stampMood() { if (ui.selected !== today()) return; const d = draftFor(today()); d.mood = ui.mood || null; persistDrafts(); }
 async function saveAbout() {
   const a = ui.ab || {}, out = {};
   const numIn = (v, lo, hi, label) => { if (v === '' || v == null) return { ok: true, v: null }; const n = Number(v);
     if (!isFinite(n) || n < lo || n > hi) { toast('Check ' + label + ': it should be between ' + lo + ' and ' + hi + '.', true); return { ok: false }; } return { ok: true, v: Math.round(n * 10) / 10 }; };
   const h = numIn(a.heightCm, 120, 230, 'height'); if (!h.ok) return; const w = numIn(a.weightKg, 30, 250, 'weight'); if (!w.ok) return;
   out.heightCm = h.v; out.weightKg = w.v; out.sex = a.sex === 'f' || a.sex === 'm' ? a.sex : null;
-  out.troubles = TROUBLES.map(t => t.id).filter(id => (a.troubles || []).includes(id)); out.troublesAsked = true;
-  const next = { ...S.settings, ...out }, r = await saveSettings(auth.user.id, next);
-  if (r.error) { toast('Couldn\u2019t save: ' + r.error.message, true); return; }
-  S.settings = next; ui.ab = null; ui.aboutOpen = false; cache.set(auth.user.id, S.entries, S.meta, S.settings); rerender();
-  toast(out.troubles.length ? 'Saved. Routine adjusted for your ' + out.troubles.length + ' pain area' + (out.troubles.length > 1 ? 's' : '') : 'Saved');
+  out.troubles = TROUBLES.map(t => t.id).filter(id => (a.troubles || []).includes(id)); out.troubleSharp = out.troubles.filter(id => (a.sharp || []).includes(id));
+  out.troublesAsked = true; out.troublesAt = today();
+  out.weightAt = out.weightKg == null ? null : out.weightKg === S.settings.weightKg ? S.settings.weightAt || today() : today();
+  if (!(await commitSettings({ ...S.settings, ...out }))) return;
+  ui.ab = null; ui.aboutOpen = false; rerender();
+  toast(out.troubleSharp.length ? 'Saved. Sharp-pain areas are rested today' : out.troubles.length ? 'Saved. Routine adjusted for your ' + out.troubles.length + ' pain area' + (out.troubles.length > 1 ? 's' : '') : 'Saved');
 }
 /* ---------- My foods (saved with your settings, so they follow you to any device) ---------- */
 async function saveMyFoods(list) {
-  const r = await saveSettings(auth.user.id, { ...S.settings, myFoods: list });
-  if (r.error) { toast('Couldn\u2019t save to My foods: ' + r.error.message, true); return false; }
-  S.settings = { ...S.settings, myFoods: list }; cache.set(auth.user.id, S.entries, S.meta, S.settings); return true;
+  return commitSettings({ ...S.settings, myFoods: list });
 }
 function addCalcFood() {
   const c = ui.calc, r = calcResult(); if (!r.ok) return;
@@ -138,7 +154,7 @@ async function doDeleteAll() {
   if (!window.confirm('Delete ALL your FitHit days and settings? This can\u2019t be undone. Tip: tap Export first.')) return;
   const typed = window.prompt('Type DELETE to confirm'); if (typed !== 'DELETE') { toast('Nothing deleted'); return; }
   const r = await deleteAll(auth.user.id); if (r.error) { toast('Couldn\u2019t delete: ' + r.error.message, true); return; }
-  S.entries = {}; S.meta = {}; S.drafts = {}; S.pending = new Set(); S.settings = { ...DEFAULT_SETTINGS }; clearDevice(); rerender(); toast('All FitHit data deleted');
+  S.entries = {}; S.meta = {}; S.drafts = {}; S.pending = new Set(); S.settings = { ...DEFAULT_SETTINGS }; S.settingsBase = null; clearDevice(); rerender(); toast('All FitHit data deleted');
 }
 
 /* ---------------- events ---------------- */
@@ -158,7 +174,7 @@ document.addEventListener('click', ev => {
       const step = suggestLoad(lastLoad(S.entries, m.id, ui.selected), moodFor(ui.selected));
       if (step) { d.loads[m.id] = { ...(d.loads[m.id] || {}), kg: step.kg, sug: true }; focusSel = '[data-load="' + m.id + '"][data-f="reps"]'; }
     }
-    if (exerciseCount(d)) d.gym = true; changed(); rerender();
+    if (exerciseCount(d)) d.gym = true; if (ui.selected === today()) d.mood = ui.mood || null; changed(); rerender();
     const sel = focusSel;
     if ((m.g === 'cardio' ? has(d.cardio, m.id) : d.machines.includes(m.id))) { const inp = document.querySelector(sel); if (inp && !inp.value) inp.focus({ preventScroll: true }); }
     return; }
@@ -168,8 +184,10 @@ document.addEventListener('click', ev => {
   if (ds.knee != null) { d = draftFor(ui.selected); const v = Number(ds.knee); d.knee = d.knee === v ? null : v; changed(); rerender(); return; }
   if (ds.meal) { ui.meal = ds.meal; rerender(); return; }
   if (ds.mins) { const v = Number(ds.mins); ui.mins = ui.mins === v ? null : v; rememberMins(ui.mins); rerender(); return; }
-  if (ds.mood) { ui.mood = ui.mood === ds.mood ? null : ds.mood; rememberMood(ui.mood); ui.othersOpen = null; if (ui.mood && !S.settings.troublesAsked) openAbout(); rerender(); return; }
-  if (ds.tr) { if (!ui.ab) openAbout(); const tr = ui.ab.troubles, i = tr.indexOf(ds.tr); if (i > -1) tr.splice(i, 1); else tr.push(ds.tr); rerender(); return; }
+  if (ds.mood) { ui.mood = ui.mood === ds.mood ? null : ds.mood; rememberMood(ui.mood); ui.othersOpen = null; if (ui.mood && !painCheckedToday()) openAbout(); stampMood(); rerender(); return; }
+  if (ds.tr) { if (!ui.ab) openAbout(); const tr = ui.ab.troubles, sh = ui.ab.sharp, id = ds.tr; // off -> niggle -> sharp -> off
+    if (!tr.includes(id)) tr.push(id); else if (!sh.includes(id)) sh.push(id); else { tr.splice(tr.indexOf(id), 1); sh.splice(sh.indexOf(id), 1); }
+    rerender(); return; }
   if (ds.how) { ui.howOpen = ui.howOpen === ds.how ? null : ds.how; rerender(); return; }
   if (ds.cxdel != null) { d = draftFor(ui.selected); d.cx.splice(Number(ds.cxdel), 1); changed(); rerender(); return; }
   if (ds.cfdel != null) { d = draftFor(ui.selected); d.cf[ui.meal].splice(Number(ds.cfdel), 1); changed(); rerender(); return; }
@@ -178,7 +196,8 @@ document.addEventListener('click', ev => {
     case 'next': if (ui.selected < today()) { ui.selected = keyOf(addDays(parseKey(ui.selected), 1)); ui.othersOpen = null; rerender(); } break;
     case 'gym': d = draftFor(ui.selected); if (isGymDay(d)) { d.gym = false; d.machines = []; d.cardio = {}; d.loads = {}; d.knee = null; } else d.gym = true; changed(); rerender(); break;
     case 'about': if (ui.aboutOpen) { ui.aboutOpen = false; ui.ab = null; } else { openAbout(); ui.aboutOpen = true; } rerender(); break;
-    case 'trnone': if (!ui.ab) openAbout(); ui.ab.troubles = []; saveAbout(); break;
+    case 'trnone': if (!ui.ab) openAbout(); ui.ab.troubles = []; ui.ab.sharp = []; saveAbout(); break;
+    case 'trsame': commitSettings({ ...S.settings, troublesAt: today() }).then(ok => { if (ok) { ui.ab = null; rerender(); toast('Same as last time. Routine ready.'); } }); break;
     case 'saveabout': saveAbout(); break;
     case 'others': { const dd = draftFor(ui.selected), ids = programmeFor(ui.selected).ids;
       const auto = !ids.length || dd.machines.some(x => !ids.includes(x)) || Object.keys(dd.cardio).some(x => !ids.includes(x));

@@ -182,3 +182,41 @@ test('kcal estimate: MET x kg x hours, block by block', () => {
   assert.equal(estimateKcal(plan, 'heavy', 78), 240); assert.equal(estimateKcal(plan, 'heavy', null), null);
 });
 test('every mood has a label and a note', () => { MOODS.forEach(m => { assert.ok(m.label); assert.ok(m.note); }); });
+
+/* ---------- panel review round 1 fixes ---------- */
+test('C1: with too little time, your usual moves stay and the free-weight extras are left out first', () => {
+  const r = buildRoutine({ mood: 'heavy', session: SESSIONS.upperA, seed: 0 }), p = buildPlan(r.session, 60);
+  const usual = SESSIONS.upperA.items.filter(id => BY_ID[id].g !== 'cardio');
+  const extras = r.items.filter(id => r.session.prio[id] === 1);
+  assert.equal(extras.length, 3);
+  extras.forEach(id => assert.ok(p.skipped.includes(id), id + ' should be left out before usual moves'));
+  assert.ok(p.steps.map(s => s.id).includes('bicep_curl'));
+  assert.ok(usual.filter(id => !p.steps.map(s => s.id).includes(id)).length <= 1);
+});
+test('C2: the mood is saved with a gym day, and only with a gym day', () => {
+  assert.equal(normalize({ machines: ['chest_press'], mood: 'light' }).mood, 'light');
+  assert.equal(normalize({ mood: 'light' }).mood, undefined);
+  assert.equal(normalize({ machines: ['chest_press'], mood: 'nonsense' }).mood, undefined);
+});
+test('C4: sharp knee pain rests every leg exercise and leaves only the seated bike', () => {
+  const r = buildRoutine({ mood: 'heavy', troubles: ['knee'], sharp: ['knee'], session: SESSIONS.legs, seed: 0 });
+  r.items.filter(id => BY_ID[id].g !== 'cardio').forEach(id => assert.ok(!(BY_ID[id].m || []).includes('Legs'), id));
+  assert.deepEqual(r.items.filter(id => BY_ID[id].g === 'cardio'), ['recumbent_bike']);
+  assert.ok(r.changes.some(c => c.sharp && c.from === 'leg_press'));
+  assert.ok(r.notes.some(n => /Sharp pain today/.test(n)));
+});
+test('C4: a niggle (not sharp) keeps leg work with the knee cues', () => {
+  const r = buildRoutine({ mood: 'heavy', troubles: ['knee'], session: SESSIONS.legs, seed: 0 });
+  assert.ok(r.items.includes('leg_press')); assert.ok(r.cues.leg_press.includes('60'));
+});
+test('C4: sharp lower-back pain allows only two gentle core moves and easy cardio', () => {
+  const r = buildRoutine({ mood: 'light', troubles: ['back'], sharp: ['back'], session: SESSIONS.upperA, seed: 0 });
+  assert.deepEqual(r.items.filter(id => BY_ID[id].g !== 'cardio'), []);
+  assert.ok(r.notes.some(n => /Nothing is safe to lift/.test(n)));
+  const c = buildRoutine({ mood: 'cardio', troubles: ['back'], sharp: ['back'], session: SESSIONS.upperA });
+  assert.deepEqual(c.items, ['recumbent_bike', 'treadmill', 'dead_bug', 'bird_dog']);
+});
+test('C4: sharp only counts for areas that are ticked', () => {
+  const r = buildRoutine({ mood: 'heavy', troubles: [], sharp: ['knee'], session: SESSIONS.legs, seed: 0 });
+  assert.ok(r.items.includes('leg_press')); assert.equal(r.changes.length, 0);
+});

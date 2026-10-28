@@ -248,6 +248,8 @@ input::-webkit-inner-spin-button{opacity:.3}
 .tchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
 .tchips button{min-height:40px;padding:6px 12px;border-radius:999px;border:1.5px solid var(--line2);background:transparent;font-size:13.5px;font-weight:600}
 .tchips button[aria-pressed=true]{border-color:var(--ember);color:var(--ember);background:var(--s1)}
+.tchips button.sharp{background:var(--ember);color:var(--bg);border-color:var(--ember)}
+.rx.tight b,.rx b.long{font-size:22px}
 .ab-b{display:flex;gap:10px;justify-content:flex-end;align-items:center;margin-top:14px}
 .ab-b .clr{white-space:nowrap}.ab-b .save{flex:1;padding:0 14px;font-size:18px;white-space:nowrap}
 .absum{display:flex;align-items:flex-start;gap:10px;margin-top:14px;padding:12px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}

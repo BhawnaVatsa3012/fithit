@@ -1,5 +1,5 @@
 // Pure data logic: no DOM, no network. Covered by tests/model.test.js.
-import { MEALS, FOOD_BY, BY_ID, PROGRESSION, RANK, MINUTES, MOOD_BY, TROUBLE_RULES, CARDIO_ORDER, FREE_ADD, FULL_BODY, CARDIO_CORE, BMI_BANDS, WHR_LIMIT, MET } from './catalogue.js';
+import { MEALS, FOOD_BY, BY_ID, PROGRESSION, RANK, MINUTES, MOOD_BY, TROUBLE_RULES, CARDIO_ORDER, FREE_ADD, FULL_BODY, CARDIO_CORE, BMI_BANDS, WHR_LIMIT, MET, SHARP_RULES, MOODS } from './catalogue.js';
 
 export const pad = n => String(n).padStart(2, '0');
 export const keyOf = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -50,7 +50,9 @@ export function buildPlan(session, mins) {
   const lifts = ids.filter(id => BY_ID[id] && BY_ID[id].g !== 'cardio' && !BY_ID[id].paused)
     .map((id, i) => ({ id, i, rank: RANK[id] || 5, dur: BY_ID[id].g === 'core' ? (session.coreMins || MINUTES.core) : (session.liftMins || MINUTES.lift) }));
   const warm = mins >= 45 ? 10 : 5, cool = mins >= 45 ? 5 : 3, rem = mins - warm - cool;
-  const need = lifts.reduce((a, x) => a + x.dur, 0), byRank = [...lifts].sort((a, b) => a.rank - b.rank || a.i - b.i);
+  // Picking order when time is short: the usual moves (prio 0) before extras (prio 1), then big moves first.
+  const P = x => (session.prio && session.prio[x.id]) || 0;
+  const need = lifts.reduce((a, x) => a + x.dur, 0), byRank = [...lifts].sort((a, b) => P(a) - P(b) || a.rank - b.rank || a.i - b.i);
   const pick = budget => { const out = []; byRank.forEach(x => { if (x.dur <= budget) { out.push(x); budget -= x.dur; } }); return out; };
   let chosen, cardio;
   if (session.cardioFocus) {
@@ -114,6 +116,7 @@ export function normalize(d) {
   });
   if (Object.keys(loads).length) out.loads = loads;
   const knee = num(d.knee, 0, 2, 1); if (out.gym && knee != null) out.knee = knee;
+  if (out.gym && MOODS.some(m => m.id === d.mood)) out.mood = d.mood;
   const meals = {}, extra = {}, extraK = {}, cf = {};
   MEALS.forEach(m => {
     const src = d.meals[m.id] || {}, o = {};
@@ -212,22 +215,30 @@ const modsFor = (id, troubles) => troubles.map(t => TROUBLE_RULES[t] && TROUBLE_
  * bmi: from bmiOf (optional). seed: a number that changes daily, to rotate the free-weight picks.
  * Returns { mood, session (feed it to buildPlan), items, cues: {id: text}, changes: [{from, to, area, why}], notes: [] }.
  */
-export function buildRoutine({ mood, troubles = [], session, bmi = null, seed = 0 }) {
+export function buildRoutine({ mood, troubles = [], sharp = [], session, bmi = null, seed = 0 }) {
   const M = MOOD_BY[mood]; if (!M) return null;
-  troubles = troubles.filter(t => TROUBLE_RULES[t]);
-  const cues = {}, changes = [], notes = [], out = [];
-  const add = (id, track) => {
+  troubles = troubles.filter(t => TROUBLE_RULES[t]); sharp = sharp.filter(t => troubles.includes(t) && SHARP_RULES[t]);
+  const cues = {}, changes = [], notes = [], out = [], prio = {};
+  /** Sharp pain area that rests this exercise, or null. */
+  const restedBy = id => { const m = BY_ID[id]; if (!m || m.g === 'cardio') return null;
+    return sharp.find(t => { const R = SHARP_RULES[t]; return R.only ? !R.only.includes(id) : (m.m || []).some(x => R.muscles.includes(x)); }) || null; };
+  const add = (id, track, p = 0) => {
     if (!BY_ID[id] || BY_ID[id].paused) return false;
+    const rest = restedBy(id);
+    if (rest) { if (track) changes.push({ from: id, to: null, area: rest, why: 'sharp pain today, so FitHit rests ' + SHARP_RULES[rest].rest, sharp: true }); return false; }
     const r = adjustFor(id, troubles);
+    if (r.id && restedBy(r.id)) r.id = null;
     if (track && r.from) changes.push({ from: r.from, to: r.id, area: r.area, why: r.why, dup: !!(r.id && out.includes(r.id)) });
     if (!r.id || out.includes(r.id)) return false;
-    out.push(r.id); if (r.cues.length) cues[r.id] = r.cues.join('. ');
+    out.push(r.id); prio[r.id] = p; if (r.cues.length) cues[r.id] = r.cues.join('. ');
     return true;
   };
   // Cardio machines, best first for the pain areas and body.
   let order = [...CARDIO_ORDER];
   if (troubles.includes('knee') || troubles.includes('ankle')) order = ['recumbent_bike', 'upright_bike', 'cross_trainer', 'treadmill'];
+  sharp.forEach(t => { if (SHARP_RULES[t].cardio) order = order.filter(id => SHARP_RULES[t].cardio.includes(id)); });
   const cardioIds = order.filter(id => adjustFor(id, troubles).id === id).slice(0, 2);
+  if (sharp.length) notes.push('Sharp pain today in your ' + sharp.map(t => t === 'back' ? 'lower back' : t).join(' and ') + ': FitHit rests ' + [...new Set(sharp.map(t => SHARP_RULES[t].rest))].join(' and ') + '. Don\u2019t train through sharp pain. If it lasts more than a few days, see a physiotherapist.' + (cardioIds.length ? ' Cardio only if it stays pain-free.' : ''));
   if (bmi && bmi.band === 'obese') notes.push('Cardio is kept low-impact (bikes, cross trainer, walking) to go easy on the knees and hips.');
   if (bmi && bmi.band === 'under') notes.push('Your BMI is under 18.5, so cardio is kept short and the focus is on building strength. Eat enough to fuel it.');
 
@@ -243,13 +254,14 @@ export function buildRoutine({ mood, troubles = [], session, bmi = null, seed = 
   base.forEach(id => add(id, true));
   // Free weights on top of the usual moves, a different pick each day.
   const pool = FREE_ADD[focus], start = Math.abs(Math.floor(seed)) % pool.length; let added = 0;
-  for (let i = 0; i < pool.length && added < M.freeAdd; i++) if (add(pool[(start + i) % pool.length], false)) added++;
+  for (let i = 0; i < pool.length && added < M.freeAdd; i++) if (add(pool[(start + i) % pool.length], false, 1)) added++;
   if (added < M.freeAdd && focus !== 'full') { // pain areas ruled some out: top up from the full-body list
-    const full = FREE_ADD.full; for (let i = 0; i < full.length && added < M.freeAdd; i++) if (add(full[(start + i) % full.length], false)) added++; }
+    const full = FREE_ADD.full; for (let i = 0; i < full.length && added < M.freeAdd; i++) if (add(full[(start + i) % full.length], false, 1)) added++; }
+  if (!out.length) notes.push('Nothing is safe to lift today with this pain. Do the cardio below if it\u2019s pain-free, or rest.');
   const lifts = out.filter(id => BY_ID[id].g !== 'core').concat(out.filter(id => BY_ID[id].g === 'core'));
   const cardio = bmi && bmi.band === 'under' ? 10 : M.cardio;
   return { mood, items: lifts.concat(cardioIds), cues, changes, notes,
-    session: { title: M.label, items: lifts.concat(cardioIds), cardio, liftMins: M.liftMin, coreMins: M.coreMin } };
+    session: { title: M.label, items: lifts.concat(cardioIds), cardio, liftMins: M.liftMin, coreMins: M.coreMin, prio } };
 }
 
 /** Weight to suggest for a machine: progression on a normal or heavy day, about 60% of last time on a light day. */

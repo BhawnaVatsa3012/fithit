@@ -223,7 +223,7 @@ export const DEFAULT_SETTINGS = {
   sessionsGoal: 5, restDow: 3,
   targetWeight: null, startWeight: null, vfGoal: 10, lastInbody: null, retestWeeks: 5,
   maxLossPerWeek: 1, whrLimit: 0.85, strengthDrop: 0.1, myFoods: [],
-  heightCm: null, weightKg: null, sex: null, troubles: [], troublesAsked: false };
+  heightCm: null, weightKg: null, weightAt: null, sex: null, troubles: [], troubleSharp: [], troublesAsked: false, troublesAt: null };
 
 /* ---------- Today's routine: mood, pain areas, body (v4) ---------- */
 export const MOODS = [
@@ -285,6 +285,19 @@ export const TROUBLE_RULES = {
     skip: { db_step_up: ['leg_press', 'balancing on one ankle'], db_reverse_lunge: ['glute_bridge', 'balancing on one ankle'], shadow_box: [null, 'bouncing on your feet'] },
     mod: { treadmill: 'Walk on a flat or low incline', cross_trainer: 'Low resistance, heels down', calf: 'Light, small range, stop if sore',
       farmer_carry: 'Short walks on a flat floor', suitcase_carry: 'Short walks', goblet_squat: 'Heels flat' } } };
+
+/* Sharp pain today: rest the whole region instead of working around it. muscles = rest any exercise working these;
+   only = the only lifts allowed; cardio = the only cardio allowed (null = any). */
+export const SHARP_RULES = {
+  knee: { muscles: ['Legs'], cardio: ['recumbent_bike'], rest: 'leg exercises' },
+  ankle: { muscles: ['Legs'], cardio: ['recumbent_bike'], rest: 'leg exercises' },
+  shoulder: { muscles: ['Chest', 'Shoulders', 'Back', 'Arms'], cardio: ['recumbent_bike', 'upright_bike', 'treadmill'], rest: 'upper-body exercises' },
+  elbow: { muscles: ['Chest', 'Shoulders', 'Back', 'Arms'], cardio: ['recumbent_bike', 'upright_bike', 'treadmill'], rest: 'upper-body exercises' },
+  wrist: { muscles: ['Chest', 'Shoulders', 'Back', 'Arms'], cardio: ['recumbent_bike', 'upright_bike', 'treadmill'], rest: 'upper-body exercises' },
+  neck: { muscles: ['Shoulders', 'Back', 'Arms'], cardio: ['recumbent_bike', 'upright_bike', 'treadmill'], rest: 'shoulder, back and arm exercises' },
+  back: { only: ['dead_bug', 'bird_dog'], cardio: ['recumbent_bike', 'treadmill'], rest: 'all lifting except two gentle core moves' } };
+/** Signs that need a doctor, not a workaround. */
+export const RED_FLAGS = 'Numbness, tingling, swelling, pain at night or at rest, or pain after a fall or twist: don\u2019t train that area, see a doctor.';
 
 /** Cardio machines best-first. Knee or ankle trouble puts the seated bikes first. */
 export const CARDIO_ORDER = ['recumbent_bike', 'cross_trainer', 'upright_bike', 'treadmill'];

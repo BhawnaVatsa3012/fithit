@@ -50,16 +50,29 @@ export async function saveDay(userId, day, data, base) {
     return { ok: true, updated_at: res.data[0].updated_at };
   } catch (e) { return { offline: true }; }
 }
+/** Settings plus their version: { settings, base } where base = updated_at, or null if no settings row exists yet. */
 export async function loadSettings() {
-  const { data, error } = await sb.from('fithit_settings').select('data').maybeSingle();
+  const { data, error } = await sb.from('fithit_settings').select('data,updated_at').maybeSingle();
   if (error) throw error;
-  return { ...DEFAULT_SETTINGS, ...((data && data.data) || {}) };
+  return { settings: { ...DEFAULT_SETTINGS, ...((data && data.data) || {}) }, base: data ? data.updated_at : null };
 }
-export async function saveSettings(userId, s) {
+/**
+ * Save settings with the same conflict check as days: the write only lands if the row is still the version we loaded
+ * (base = updated_at we last saw, or null if we think there is no row). Returns { ok, base } / { conflict } / { error }.
+ */
+export async function saveSettings(userId, s, base) {
   const clean = {};
-  Object.keys(DEFAULT_SETTINGS).forEach(k => { if (s[k] !== undefined && s[k] !== DEFAULT_SETTINGS[k]) clean[k] = s[k]; });
-  const { error } = await sb.from('fithit_settings').upsert({ user_id: userId, data: clean }, { onConflict: 'user_id' });
-  return error ? { error } : { ok: true };
+  Object.keys(DEFAULT_SETTINGS).forEach(k => { if (s[k] !== undefined && JSON.stringify(s[k]) !== JSON.stringify(DEFAULT_SETTINGS[k])) clean[k] = s[k]; });
+  try {
+    if (base) {
+      const r = await sb.from('fithit_settings').update({ data: clean }).eq('user_id', userId).eq('updated_at', base).select('updated_at');
+      if (r.error) return { error: r.error };
+      return r.data.length ? { ok: true, base: r.data[0].updated_at } : { conflict: true };
+    }
+    const r = await sb.from('fithit_settings').insert({ user_id: userId, data: clean }).select('updated_at');
+    if (r.error) return r.error.code === '23505' ? { conflict: true } : { error: r.error };
+    return { ok: true, base: r.data[0].updated_at };
+  } catch { return { error: { message: 'no connection' } }; }
 }
 export async function exportAll() {
   const [days, settings] = await Promise.all([sb.from(T).select('day,data,created_at,updated_at').order('day'), sb.from('fithit_settings').select('data,updated_at').maybeSingle()]);
@@ -78,7 +91,7 @@ const read = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); 
 const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage full or blocked */ } };
 export const cache = {
   get: uid => { const c = read(CACHE); return c && c.uid === uid ? c : null; },
-  set: (uid, entries, meta, settings) => write(CACHE, { uid, entries, meta, settings }) };
+  set: (uid, entries, meta, settings) => write(CACHE, { uid, entries, meta, settings }) }; // settings are a display copy only; saves need a fresh server version
 export const draftStore = {
   get: uid => { const c = read(DRAFTS); return c && c.uid === uid ? c.drafts || {} : {}; },
   set: (uid, drafts) => write(DRAFTS, { uid, drafts }) };
