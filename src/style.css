@@ -262,3 +262,6 @@ input::-webkit-inner-spin-button{opacity:.3}
 /* v4.1: today's focus dropdown */
 .dtype{display:grid;gap:6px;margin-top:14px}
 .dtype .sel{min-height:44px;font-weight:700;font-size:15px}
+/* v4.2: sign-in code */
+.auth .code{letter-spacing:.3em;font-size:22px;font-weight:700}
+.authbtns{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}

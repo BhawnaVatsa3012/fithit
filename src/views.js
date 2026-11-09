@@ -480,7 +480,12 @@ export function authView() {
   let h = '<header class="hdr"><div class="mark"><b>FITHIT</b><i></i></div></header><section class="auth">';
   if (auth.user && auth.member === false) return h + '<div class="kick v">Private app</div><h1>Not set up for this account</h1><p class="msg">This FitHit belongs to another account, so <b>' + esc(auth.user.email) + '</b> can\u2019t see or save anything here. If this is your FitHit, sign out and use the email you first signed in with.</p><button class="clr" style="margin-top:18px" data-act="signout">Sign out</button></section>';
   h += '<div class="kick v">Welcome back</div><h1>Sign in</h1>';
-  if (auth.sent) h += '<p class="msg">We sent a sign-in link to <b>' + esc(auth.email) + '</b>. Open it on this device to continue. The link works once. If it hasn\u2019t arrived in a few minutes, check spam.</p><button class="clr" style="margin-top:18px" data-act="resend">Use a different email</button>';
+  // v4.2: type the code from the email here, so the home-screen app signs in itself (a tapped link opens in the browser instead).
+  if (auth.sent) h += '<p class="msg">We sent an email to <b>' + esc(auth.email) + '</b>. Type the code from it below. This signs in the app you\u2019re in, including the home-screen app.</p>' +
+    '<form id="otp"><label class="field"><span>Code from the email</span><input class="email code" id="otpcode" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="10" placeholder="123456" required></label>' +
+    '<button class="save full" type="submit"' + (auth.busy ? ' disabled' : '') + '>' + (auth.busy ? 'Checking\u2026' : 'Sign in') + '</button></form>' +
+    '<p class="msg">Each code works once and expires in an hour. Not there after a few minutes? Check spam. The link in the email still works too, but it signs in the browser it opens in.</p>' +
+    '<div class="authbtns"><button class="clr" data-act="resendcode">Send a new code</button><button class="clr" data-act="resend">Use a different email</button></div>';
   else h += '<p class="msg">Enter your email and we\u2019ll send you a link. No password needed. You stay signed in on this device.</p>' +
     '<form id="signin"><label class="field"><span>Email</span><input class="email" id="email" type="email" autocomplete="email" inputmode="email" required value="' + esc(auth.email) + '"></label>' +
     '<button class="save full" type="submit"' + (auth.busy ? ' disabled' : '') + '>' + (auth.busy ? 'Sending\u2026' : 'Send sign-in link') + '</button></form>';

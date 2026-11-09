@@ -2,7 +2,7 @@ import './style.css';
 import { BY_ID, MEALS, DEFAULT_SETTINGS, TROUBLES } from './catalogue.js';
 import { keyOf, parseKey, addDays, has, clone, ensure, normalize, isEmpty, isGymDay, exerciseCount, lastLoad, suggestLoad, cleanText } from './model.js';
 import { sb, claim, loadAll, saveDay, loadSettings, saveSettings, exportAll, deleteAll, cache, draftStore, clearDevice } from './store.js';
-import { S, auth, ui, today, draftFor, isDirty, anyDirty, viewOf, persistDrafts, derive, rememberMins, rememberMood, rememberDtype } from './state.js';
+import { S, auth, ui, today, draftFor, isDirty, anyDirty, viewOf, persistDrafts, derive, rememberMins, rememberMood, rememberDtype, rememberPending } from './state.js';
 import { header, switcher, logView, mealsSummary, mealTiles, proteinWeek, mealsView, saveBar, progressView, calendarView, navHtml, authView, guideView, calcResult, calcFoods, programmeFor, moodFor, painCheckedToday, dayTypeOf } from './views.js';
 
 /* ---------------- render ---------------- */
@@ -234,7 +234,8 @@ document.addEventListener('click', ev => {
     case 'signout':
       if (anyDirty() && !window.confirm('You have unsaved changes. Sign out anyway? They\u2019ll be lost.')) break;
       sb.auth.signOut().then(() => clearDevice()); break;
-    case 'resend': auth.sent = false; auth.error = ''; render(); break;
+    case 'resend': auth.sent = false; auth.error = ''; rememberPending(null); render(); break;
+    case 'resendcode': sendCode(auth.email); break;
   }
 });
 document.addEventListener('input', ev => {
@@ -258,14 +259,26 @@ document.addEventListener('change', ev => { const t = ev.target, ds = t.dataset 
   if (ds.calc === 'food') { ui.calc.food = t.value; ui.calc.qty = ''; rerender(); }
   if (ds.calc === 'u' || ds.cfq != null) rerender();
   if (ds.dtype) setDayType(t.value); });
-document.addEventListener('submit', ev => {
-  if (ev.target.id !== 'signin') return; ev.preventDefault();
-  const email = (document.getElementById('email').value || '').trim(); if (!email) return;
+/** Email a sign-in code (the same email also carries a link). */
+function sendCode(email) {
+  if (!email) return;
   auth.email = email; auth.busy = true; auth.error = ''; render();
   sb.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin, shouldCreateUser: true } }).then(res => {
     auth.busy = false;
-    if (res.error) auth.error = /rate|seconds/i.test(res.error.message) ? 'Too many links requested. Wait a few minutes, then try again.' : 'Couldn\u2019t send the link: ' + res.error.message;
-    else auth.sent = true;
+    if (res.error) auth.error = /rate|seconds/i.test(res.error.message) ? 'Too many emails requested. Wait a minute, then try again.' : 'Couldn\u2019t send the email: ' + res.error.message;
+    else { auth.sent = true; rememberPending(email); }
+    render();
+  });
+}
+document.addEventListener('submit', ev => {
+  if (ev.target.id === 'signin') { ev.preventDefault(); sendCode((document.getElementById('email').value || '').trim()); return; }
+  if (ev.target.id !== 'otp') return; ev.preventDefault();
+  const token = (document.getElementById('otpcode').value || '').replace(/\D/g, ''); if (token.length < 6) { auth.error = 'Type the whole code from the email.'; render(); return; }
+  auth.busy = true; auth.error = ''; render();
+  sb.auth.verifyOtp({ email: auth.email, token, type: 'email' }).then(res => {
+    auth.busy = false;
+    if (res.error) auth.error = /expired|invalid/i.test(res.error.message) ? 'That code is wrong, expired or already used. Check it, or tap Send a new code.' : 'Couldn\u2019t sign in: ' + res.error.message;
+    else { rememberPending(null); auth.sent = false; }
     render();
   });
 });
@@ -285,6 +298,7 @@ async function start() {
     const type = ['email', 'magiclink', 'signup'].includes(q.get('type')) ? q.get('type') : 'email';
     const { error } = await sb.auth.verifyOtp({ token_hash: th, type });
     history.replaceState(null, '', window.location.pathname);
+    if (!error) { rememberPending(null); auth.sent = false; }
     if (error) { auth.error = /expired|invalid/i.test(error.message) ? 'That sign-in link has expired or was already used. Send a new one below.' : 'Couldn\u2019t sign in: ' + error.message; }
   }
   const r = await sb.auth.getSession();

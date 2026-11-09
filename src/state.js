@@ -7,6 +7,11 @@ import { DOW } from './catalogue.js';
 /* ---------------- state ---------------- */
 export const S = { entries: {}, meta: {}, settings: { ...DEFAULT_SETTINGS }, settingsBase: undefined, drafts: {}, saving: null, pending: new Set() }; // settingsBase undefined = not loaded from the server yet
 export const auth = { user: null, ready: false, loaded: false, member: null, email: '', sent: false, error: '', busy: false };
+/* v4.2: remember a sign-in in progress (email + when the code was sent) so the code box is still there if the
+   home-screen app reloads while you're in Gmail. Codes expire after an hour, so older ones are ignored. */
+const PENDING_KEY = 'fithit-signin';
+export function rememberPending(email) { try { if (email) localStorage.setItem(PENDING_KEY, JSON.stringify({ email, at: Date.now() })); else localStorage.removeItem(PENDING_KEY); } catch { /* storage blocked */ } }
+try { const p = JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); if (p && p.email && Date.now() - p.at < 3600000) { auth.email = p.email; auth.sent = true; } } catch { /* storage blocked */ }
 export const today = () => keyOf(new Date());
 export const ui = { tab: 'log', selected: today(), othersOpen: null, meal: defaultMeal(), settingsOpen: false, sd: null,
   mins: readMins(), mood: readMood(), dtype: readDtype(), aboutOpen: false, ab: null, howOpen: null, cx: {}, calc: { food: 'b:whey', qty: '', n: '', u: '', p: '', k: '', save: true } };
